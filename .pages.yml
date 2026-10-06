@@ -17,6 +17,13 @@ media:
     output: /images
     extensions: [jpg, jpeg, png, webp, gif, svg]
 
+  # 管理组成员皮肤 PNG 专用目录（StaffCarousel.vue 的 skin 字段），站点路径 /skin/staff/<文件名>
+  - name: skins
+    label: 管理组皮肤
+    input: public/skin/staff
+    output: /skin/staff
+    extensions: [png]
+
 # -----------------------------------------------------------------------------
 # 内容集合
 # -----------------------------------------------------------------------------
@@ -533,8 +540,8 @@ content:
       - { name: body, label: 正文, type: rich-text }
 
   # 14. 管理组成员（staff/*.md，StaffCarousel.vue 轮播展示，嵌入于 about.md）
-  # skin 为成员 Minecraft 皮肤 PNG（64x64 或 64x32），经 CMS 图片上传写入；
-  # 未上传或加载失败时组件显示「皮肤待上传」占位提示，不影响其余内容
+  # skin 为成员 Minecraft 皮肤 PNG（64x64 或 64x32），经 CMS 上传到 public/skin/staff/
+  # 后自动写入 /skin/staff/<文件名>；未上传或加载失败时组件显示「皮肤待上传」占位提示
   - name: staff
     label: 管理组成员
     type: collection
@@ -554,7 +561,7 @@ content:
         label: 皮肤 PNG
         type: image
         options:
-          media: images
+          media: skins
 
 # -----------------------------------------------------------------------------
 # 全局设置

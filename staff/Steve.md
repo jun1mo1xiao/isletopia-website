@@ -5,5 +5,5 @@ name: Steve
 role: 服主
 weight: 0
 bio: 梦幻之屿的创始人，从 2020 年开服至今一直守护着这片天空，负责服务器架构与版本升级，坚信公益、正版、不删档的底线。
-skin: /images/staff/steve.png
+skin: /skin/staff/lowrie_blub_pinkshirt_wide_2026.png
 ---
