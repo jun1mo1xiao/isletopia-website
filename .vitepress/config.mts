@@ -101,8 +101,9 @@ export default defineConfig({
   description: SITE_INFO.description,
   lang: SITE_INFO.lang,
   sitemap: { hostname: SEO.hostname },
-  // 仓库 README.md 是给 GitHub 看的说明，不作为站点页面构建/收录
-  srcExclude: ['README.md'],
+  // 仓库 README.md 是给 GitHub 看的说明，不作为站点页面构建/收录；
+  // staff/ 是管理组成员数据（frontmatter，仅供 StaffCarousel.vue 读取），同样不生成页面
+  srcExclude: ['README.md', 'staff/*.md'],
   // 合成表页面（/crafting）的物品贴图虚拟模块与资产规则，见 mc-textures-plugin.mts
   vite: {
     plugins: [mcTextures()],

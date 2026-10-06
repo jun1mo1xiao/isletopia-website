@@ -532,6 +532,30 @@ content:
       - { name: sidebar, label: 显示侧边栏, type: boolean, default: false }
       - { name: body, label: 正文, type: rich-text }
 
+  # 14. 管理组成员（staff/*.md，StaffCarousel.vue 轮播展示，嵌入于 about.md）
+  # skin 为成员 Minecraft 皮肤 PNG（64x64 或 64x32），经 CMS 图片上传写入；
+  # 未上传或加载失败时组件显示「皮肤待上传」占位提示，不影响其余内容
+  - name: staff
+    label: 管理组成员
+    type: collection
+    path: staff
+    filename: "{primary}.md"
+    format: yaml-frontmatter
+    view:
+      fields: [name, role]
+      primary: name
+      sort: name
+    fields:
+      - { name: name, label: 成员名称（游戏 ID）, type: string, required: true }
+      - { name: role, label: 职务, type: string, required: true }
+      - { name: bio, label: 一段话简介（单段文字）, type: text, required: true }
+      - { name: weight, label: 排序权重（越小越靠前，默认 0）, type: number }
+      - name: skin
+        label: 皮肤 PNG
+        type: image
+        options:
+          media: images
+
 # -----------------------------------------------------------------------------
 # 全局设置
 # -----------------------------------------------------------------------------

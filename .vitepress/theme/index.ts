@@ -15,6 +15,7 @@ import SocialLinks from './components/SocialLinks.vue'
 import NewsFeed from './components/NewsFeed.vue'
 import HeroTagline from './components/HeroTagline.vue'
 import CraftingPage from './components/CraftingPage.vue'
+import StaffCarousel from './components/StaffCarousel.vue'
 import SearchBox from './search/SearchBox.vue'
 // @ts-ignore -- 该包无类型声明
 import busuanzi from 'busuanzi.pure.js'
@@ -45,6 +46,7 @@ export default {
     app.component('NewsFeed', NewsFeed)
     app.component('HeroTagline', HeroTagline)
     app.component('CraftingPage', CraftingPage)
+    app.component('StaffCarousel', StaffCarousel)
     app.component('SearchBox', SearchBox)
     app.component('VPButton', VPButton)
 
