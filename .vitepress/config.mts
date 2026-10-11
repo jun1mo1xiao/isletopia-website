@@ -202,6 +202,8 @@ export default defineConfig({
       linkText: '返回首页'
     },
     outline: { level: 'deep', label: '本页概览' },
+    // 文档页底部翻页链接的文案（默认英文 Previous page / Next page）
+    docFooter: { prev: '上一章', next: '下一章' },
     // 导航栏与文档侧边栏分别维护在 theme/config/nav.ts、theme/config/sidebar.ts（唯一数据源）；
     // 「活动」分组由 config 扫描 events/ 目录自动生成（见 getEventsList）
     nav: NAV,
