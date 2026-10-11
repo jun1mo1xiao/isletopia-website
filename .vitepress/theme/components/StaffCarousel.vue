@@ -2,15 +2,37 @@
 // 管理组成员轮播卡片（嵌入于 about.md「管理团队」，全局注册名 StaffCarousel）
 // 成员数据来自项目根 staff/ 目录的 md frontmatter（Pages CMS「管理组成员」集合），
 // 构建期由 Vite 读盘打包，CMS 改动后重新部署即生效。
+// 轮播方式为整页滑动：所有成员卡片排成一条横向轨道，整体 translateX 左移切换
+// （皮肤预览随卡片一起滑动）。每个成员一个 skinview3d 实例，惰性创建——
+// 首次滑到该页才建 WebGL 上下文；非当前页 renderPaused 暂停渲染循环，避免多开空转。
 // skinview3d 依赖 WebGL，只能在浏览器端初始化：动态 import 放在 onMounted 内，
 // SSR 阶段仅渲染卡片骨架，不加载 three。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { parseFrontmatter } from '../utils/articleFeed'
+// skinview3d 只用它的形象与渲染，动作数据换成 Blockbench 导出的
+// animations/*.animation.json（播放器见 utils/blockbenchAnimation）。
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { parseFrontmatter, type YamlValue } from '../utils/articleFeed'
+import { ENTRANCE_BLEND_SECONDS } from '../config'
+import {
+  BlockbenchAnimation,
+  compileAnimation,
+  type CompiledAnimation,
+  type RigAnimation,
+  type RigNode
+} from '../utils/blockbenchAnimation'
 
 // 自动轮播间隔（ms），可通过 <StaffCarousel :interval="8000" /> 覆盖
 const props = withDefaults(defineProps<{ interval?: number }>(), {
   interval: 5000
 })
+
+// 动作配置整体收在 frontmatter 的 animation 节点下，分入场与待机两段，
+// 各自的 name（动画文件名，即 animations/<name>.animation.json）与 speed 互不影响。
+// 入场动作只播一整段（动画自身的长度，文件里写着循环也照样只播一圈），
+// 播完就混合到待机动作，所以没有「播放时长」可填
+interface StaffAnimation {
+  entrance: { name: string; speed: number }
+  idle: { name: string; speed: number }
+}
 
 interface StaffMember {
   name: string
@@ -18,6 +40,72 @@ interface StaffMember {
   bio: string
   skin: string
   weight: number
+  animation: StaffAnimation
+}
+
+// 入场按原速播放；待机放慢到 0.7 倍速，卡片里看着更稳
+const DEFAULT_ENTRANCE_SPEED = 1
+const DEFAULT_IDLE_SPEED = 0.7
+
+// 留空或非法值回退默认值
+function parseNumber(raw: unknown, fallback: number, min: number): number {
+  const text = String(raw ?? '').trim()
+  if (!text) return fallback
+  const n = Number(text)
+  return Number.isFinite(n) && n >= min ? n : fallback
+}
+
+const asRecord = (raw: unknown): Record<string, YamlValue> =>
+  raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, YamlValue>)
+    : {}
+
+const asName = (raw: YamlValue | undefined, fallback: string): string =>
+  (typeof raw === 'string' && raw.trim()) || fallback
+
+function parseAnimation(raw: unknown): StaffAnimation {
+  const root = asRecord(raw)
+  const entrance = asRecord(root.entrance)
+  const idle = asRecord(root.idle)
+  return {
+    entrance: {
+      // 留空即无入场动作，一直保持待机
+      name: asName(entrance.name, 'none'),
+      // 下限 0.01 而不是 0：入场动作必须播完一整段，速度填 0 会永远停在起始姿势
+      speed: parseNumber(entrance.speed, DEFAULT_ENTRANCE_SPEED, 0.01)
+    },
+    idle: {
+      name: asName(idle.name, 'idle'),
+      // 待机可以显式填 0，等于定格在待机动画的起始姿势
+      speed: parseNumber(idle.speed, DEFAULT_IDLE_SPEED, 0)
+    }
+  }
+}
+
+// —— 动作数据：项目根 animations/<名字>.animation.json（Blockbench 导出的 Bedrock 动画格式） ——
+// 构建期 eager 打包成 JSON 对象，文件名（去掉后缀）即 CMS 里可填的动作名，
+// 新增动作只要往目录里放一个文件，不用改代码
+const animationFiles = import.meta.glob('/animations/*.animation.json', {
+  import: 'default',
+  eager: true
+}) as Record<string, unknown>
+
+const compiledAnimations: Record<string, CompiledAnimation> = {}
+for (const [path, json] of Object.entries(animationFiles)) {
+  const name = path.slice(path.lastIndexOf('/') + 1, -'.animation.json'.length)
+  const compiled = compileAnimation(json, name)
+  if (compiled) compiledAnimations[name] = compiled
+  else console.warn(`[StaffCarousel] ${path} 不是可用的动画，已忽略`)
+}
+
+// 动作名 -> 动画实例。name 取值与 .pages.yml 里
+// staff.animation.entrance.name / staff.animation.idle.name 的下拉一致，
+// 认不出来的动作回退到 idle 文件，避免 CMS 填错就把形象搞没了；
+// 'none' 由调用方当作「没有动作」处理。once 用于入场：只播一整段，文件里写着循环也照样只播一圈
+function createAnimation(name: string, once: boolean): RigAnimation | null {
+  const animation = compiledAnimations[name] ?? compiledAnimations.idle
+  if (!animation) return null
+  return new BlockbenchAnimation(animation, once)
 }
 
 // 成员 md 原文（?raw 由 Vite 直接读盘）；staff 条目少，构建期 eager 打包
@@ -35,7 +123,8 @@ const members: StaffMember[] = Object.values(rawModules)
       role: String(data.role || ''),
       bio: String(data.bio || ''),
       skin: String(data.skin || ''),
-      weight: Number(data.weight) || 0
+      weight: Number(data.weight) || 0,
+      animation: parseAnimation(data.animation)
     }
   })
   .filter((m) => m.name)
@@ -44,12 +133,10 @@ const members: StaffMember[] = Object.values(rawModules)
 
 const count = members.length
 const current = ref(0)
-// 悬停 / 键盘聚焦时暂停自动轮播，方便阅读与拖拽 3D 形象
+// 悬停 / 键盘聚焦时暂停自动轮播，方便读完一段简介
 const paused = ref(false)
-
-const currentMember = computed(
-  () => members[current.value] ?? { name: '', role: '', bio: '', skin: '', weight: 0 }
-)
+// 每位成员的皮肤加载状态（未配置 / 加载失败 → 显示占位提示）
+const skinMissing = ref<boolean[]>(members.map(() => false))
 
 function goTo(i: number) {
   if (count === 0) return
@@ -83,80 +170,295 @@ function restartTimer() {
   if (timer !== null) startTimer()
 }
 
-onMounted(startTimer)
-
-// —— skinview3d 3D 形象 ——
-const stageRef = ref<HTMLElement | null>(null)
-// 皮肤未配置或加载失败时显示占位提示
-const skinMissing = ref(false)
+// —— skinview3d 3D 形象（每页一个，惰性创建 + 离页暂停） ——
 type SkinViewer = import('skinview3d').SkinViewer
 type Skinview3dModule = typeof import('skinview3d')
-let viewer: SkinViewer | null = null
-let observer: ResizeObserver | null = null
+const stageEls: (HTMLElement | null)[] = []
+const viewers: (SkinViewer | null)[] = []
+const observers: (ResizeObserver | null)[] = []
+let skinview3d: Skinview3dModule | null = null
 let disposed = false
 
-function loadCurrentSkin() {
+function setStageRef(i: number, el: unknown) {
+  stageEls[i] = (el as HTMLElement | null) ?? null
+}
+
+function loadSkin(i: number) {
+  const viewer = viewers[i]
   if (!viewer) return
-  const skin = currentMember.value.skin
+  const skin = members[i].skin
   if (!skin) {
     viewer.loadSkin(null)
-    skinMissing.value = true
+    skinMissing.value[i] = true
     return
   }
   viewer
     .loadSkin(skin)
     .then(() => {
-      skinMissing.value = false
+      skinMissing.value[i] = false
     })
     .catch(() => {
       // 皮肤文件尚未上传（CMS 里还没传图）或路径有误：清空形象并提示
-      viewer?.loadSkin(null)
-      skinMissing.value = true
+      viewer.loadSkin(null)
+      skinMissing.value[i] = true
     })
 }
 
-onMounted(async () => {
-  if (count === 0 || !stageRef.value) return
-  let skinview3d: Skinview3dModule
+// 正交观感：skinview3d 内部固定使用 PerspectiveCamera，无法换成 OrthographicCamera，
+// 这里用「极小 fov + 等比拉远」逼近正交投影。可见高度 = 9·tan(fov/2) + 33/zoom，
+// 取 fov 10°、zoom 0.7725 使取景与原先的 fov 55 / zoom 0.85 完全一致；
+// 对应相机距离约 249，仍在 skinview3d 内部 10~256 的限幅内（再小就会被卡住而放大画面）。
+const ORTHO_LIKE_FOV = 10
+const ORTHO_LIKE_ZOOM = 0.7725
+
+// 相机朝向（度）：yaw 绕竖直轴水平转，pitch 向上抬升；改这两个常量即可换视角
+const CAMERA_YAW_DEG = -30
+const CAMERA_PITCH_DEG = 20
+
+// 沿指定方向重摆相机。距离取 skinview3d 已按 fov/zoom 算好的值，只改方向不改距离，
+// 取景大小因此不变；朝向由 OrbitControls.update() 按 target 重新 lookAt
+function setCameraPose(viewer: SkinViewer) {
+  const yaw = (CAMERA_YAW_DEG * Math.PI) / 180
+  const pitch = (CAMERA_PITCH_DEG * Math.PI) / 180
+  const d = viewer.camera.position.length()
+  viewer.camera.position.set(
+    d * Math.sin(yaw) * Math.cos(pitch),
+    d * Math.sin(pitch),
+    d * Math.cos(yaw) * Math.cos(pitch)
+  )
+  viewer.controls.target.set(0, 0, 0)
+  viewer.controls.update()
+}
+
+// —— 入场动作 → 待机动作 两段式播放 ——
+// 入场动作只播一整段（一次性的挥手、挥击、下蹲、起飞），时长由动画文件自己决定；
+// 播完进入混合期（过渡时长按站点配置 ENTRANCE_BLEND_SECONDS，全体成员统一）：
+// 每帧把两个动画各摆一遍姿势，再对整棵子树逐节点插值过渡到待机动作，
+// 之后待机一直保持。切到该成员、或双击形象时重播整段。
+
+type PlayerRig = import('skinview3d').PlayerObject
+
+interface PoseState {
+  phase: 'entrance' | 'blend' | 'idle'
+  entrance: RigAnimation | null
+  idle: RigAnimation
+  /** 混合进度 0~1 */
+  blend: number
+  /** 参与插值的节点（首帧从形象子树收集） */
+  nodes: RigNode[] | null
+  /** 混合期两趟姿势快照，每个节点 6 个分量（position + rotation） */
+  from: number[]
+  to: number[]
+}
+
+const poses: (PoseState | null)[] = []
+
+// 整棵子树逐节点插值：动画写入的骨骼除了六个肢体，还可能是整体（root）、cape、elytra，
+// 改动会连带传到下属节点，只挑几个刚体插的话，其余节点会在混合起点直接跳到待机姿势
+function collectRigNodes(player: PlayerRig): RigNode[] {
+  const nodes: RigNode[] = []
+  player.traverse((node) => nodes.push(node as unknown as RigNode))
+  return nodes
+}
+
+// resetJoints 会把肢体/pivot/cape/elytra 全部摆回绑定姿势，但不含整体变换，
+// 所以整体位移和朝向要自己清回原点
+function resetRig(player: PlayerRig) {
+  player.resetJoints()
+  player.position.set(0, 0, 0)
+  player.rotation.set(0, 0, 0)
+}
+
+function capturePose(nodes: RigNode[], out: number[]) {
+  let n = 0
+  for (const node of nodes) {
+    out[n++] = node.position.x
+    out[n++] = node.position.y
+    out[n++] = node.position.z
+    out[n++] = node.rotation.x
+    out[n++] = node.rotation.y
+    out[n++] = node.rotation.z
+  }
+}
+
+// 角度归到 (-π, π]
+function wrapAngle(rad: number) {
+  return Math.atan2(Math.sin(rad), Math.cos(rad))
+}
+
+function easeInOut(k: number) {
+  return k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2
+}
+
+// 角度按最短弧插值，位移按线性插值——两者绝不能混用一个插值函数：
+// 把 wrap 套到位移上等于把差值折进 ±π，蹲下这种超过 3 单位的位移会被掰到反方向，
+// 混合结束时姿势是错的，切到纯待机的那一帧就「啪」地弹一下。
+// 角度必须绕最短弧：动画里的角度是以弧度直接写在节点上的，绑定姿势上就有 cape 的
+// rotation.y = π，照原值线性插值等于让披风多转一整圈。
+function mixPose(nodes: RigNode[], a: number[], b: number[], k: number) {
+  let n = 0
+  const lerp = (j: number) => a[j] + (b[j] - a[j]) * k
+  const slerp = (j: number) => a[j] + wrapAngle(b[j] - a[j]) * k
+  for (const node of nodes) {
+    node.position.set(lerp(n), lerp(n + 1), lerp(n + 2))
+    node.rotation.set(slerp(n + 3), slerp(n + 4), slerp(n + 5))
+    n += 6
+  }
+}
+
+function createPose(m: StaffMember): PoseState | null {
+  const { entrance: ent, idle: idleCfg } = m.animation
+  const idle = createAnimation(idleCfg.name, false)
+  if (!idle) return null
+  // 入场动作只播一整段，播多久由动画文件自己的长度决定
+  const entrance = ent.name === 'none' ? null : createAnimation(ent.name, true)
+  // 入场与待机各自按自己的速度播放，改待机速度不会连带改变入场快慢
+  idle.speed = idleCfg.speed
+  if (entrance) entrance.speed = ent.speed
+  return {
+    phase: entrance ? 'entrance' : 'idle',
+    entrance,
+    idle,
+    blend: 0,
+    nodes: null,
+    from: [],
+    to: []
+  }
+}
+
+// 每帧的姿势调度，由下面挂到 viewer 上的 FunctionAnimation 回调驱动
+function updatePose(i: number, player: PlayerRig, rawDt: number) {
+  const s = poses[i]
+  if (!s) return
+  if (!s.nodes) {
+    const nodes = collectRigNodes(player)
+    s.nodes = nodes
+    s.from = new Array(nodes.length * 6).fill(0)
+    s.to = new Array(nodes.length * 6).fill(0)
+  }
+  const nodes = s.nodes
+  // 切回后台标签页后 rAF 会攒出一个巨大的帧间隔，不截断的话入场和混合会在同一帧内直接跑完
+  const dt = Math.min(rawDt, 0.1)
+  if (s.phase === 'entrance' && s.entrance) {
+    resetRig(player)
+    s.entrance.update(player, dt)
+    // 入场动画自己报「一整段播完了」，才交棒给待机
+    if (s.entrance.done) {
+      s.phase = 'blend'
+      s.blend = 0
+    }
+    return
+  }
+  if (s.phase === 'blend' && s.entrance) {
+    // 配置填 0 表示瞬间切换；直接除以 0 会在 dt 为 0 的那一帧算出 NaN，所以显式分支
+    s.blend = Math.min(
+      1,
+      s.blend + (ENTRANCE_BLEND_SECONDS > 0 ? dt / ENTRANCE_BLEND_SECONDS : 1)
+    )
+    resetRig(player)
+    s.entrance.update(player, dt)
+    capturePose(nodes, s.from)
+    resetRig(player)
+    s.idle.update(player, dt)
+    capturePose(nodes, s.to)
+    mixPose(nodes, s.from, s.to, easeInOut(s.blend))
+    if (s.blend >= 1) {
+      s.phase = 'idle'
+      s.entrance = null
+    }
+    return
+  }
+  resetRig(player)
+  s.idle.update(player, dt)
+}
+
+// 重播入场动作（双击形象、以及轮播切到该成员时调用）
+function playEntrance(i: number) {
+  const s = poses[i]
+  if (!s) return
+  const entranceCfg = members[i].animation.entrance
+  if (entranceCfg.name === 'none') {
+    s.phase = 'idle'
+    s.entrance = null
+    return
+  }
+  // 每次重播都新建实例，progress 从 0 开始，一整段重新走一遍
+  const entrance = createAnimation(entranceCfg.name, true)
+  if (!entrance) return
+  entrance.speed = entranceCfg.speed
+  s.entrance = entrance
+  s.blend = 0
+  s.phase = 'entrance'
+}
+
+async function ensureViewer(i: number) {
+  if (!stageEls[i]) return
+  if (viewers[i]) {
+    // 已有实例：恢复渲染循环即可
+    viewers[i]!.renderPaused = false
+    return
+  }
   try {
-    skinview3d = await import('skinview3d')
+    skinview3d ||= await import('skinview3d')
   } catch {
     return
   }
-  // 等待动态导入期间组件可能已被卸载（VitePress 切页）
-  if (disposed || !stageRef.value) return
-
-  const stage = stageRef.value
-  viewer = new skinview3d.SkinViewer({
+  if (disposed) return
+  const stage = stageEls[i]!
+  // 动画目录缺 idle 时 createPose 返回 null，形象按绑定姿势静止显示
+  poses[i] = createPose(members[i])
+  // FunctionAnimation 只当作「每帧回调」用：真正的两段式调度在 updatePose 里。
+  // 它自身 speed 保持 1，回调拿到的就是未经缩放的真实帧间隔，入场/待机各自按配置速度推进
+  const animation = new skinview3d.FunctionAnimation((player, _progress, dt) =>
+    updatePose(i, player, dt)
+  )
+  const viewer = new skinview3d.SkinViewer({
     canvas: stage.querySelector('canvas')!,
     // 以舞台实际尺寸初始化；后续尺寸变化由 ResizeObserver 同步
     width: stage.clientWidth || 300,
     height: stage.clientHeight || 400,
-    fov: 55,
-    zoom: 0.85,
-    animation: new skinview3d.IdleAnimation()
+    fov: ORTHO_LIKE_FOV,
+    zoom: ORTHO_LIKE_ZOOM,
+    animation
   })
-  viewer.animation!.speed = 0.7
-  viewer.autoRotate = true
-  viewer.autoRotateSpeed = 1.5
-  loadCurrentSkin()
-
-  observer = new ResizeObserver(() => {
-    if (!viewer || !stage.clientWidth || !stage.clientHeight) return
-    viewer.setSize(stage.clientWidth, stage.clientHeight)
+  // 不自动旋转（skinview3d 的 autoRotate 转的是人物而非相机），只保留所选动作本身
+  viewer.autoRotate = false
+  // 固定相机视角，锁掉拖拽与滚轮缩放，避免被转歪后无法回正
+  viewer.controls.enableRotate = false
+  viewer.controls.enableZoom = false
+  setCameraPose(viewer)
+  const observer = new ResizeObserver(() => {
+    if (stage.clientWidth && stage.clientHeight) {
+      viewer.setSize(stage.clientWidth, stage.clientHeight)
+    }
   })
   observer.observe(stage)
+  observers[i] = observer
+  viewers[i] = viewer
+  loadSkin(i)
+}
+
+watch(current, (now, before) => {
+  // 离开当前页时暂停其渲染循环，GPU 只为可见页工作
+  if (viewers[before]) viewers[before]!.renderPaused = true
+  // 切到的这一位重走一遍入场 → 待机。viewer 首次创建时 createPose 本就停在入场阶段，
+  // 等 ensureViewer 落定再触发，让「新建」和「已存在」两种情况表现一致
+  ensureViewer(now).then(() => playEntrance(now))
 })
 
-watch(current, loadCurrentSkin)
+onMounted(() => {
+  startTimer()
+  ensureViewer(0)
+})
 
 onBeforeUnmount(() => {
   disposed = true
   stopTimer()
-  observer?.disconnect()
-  observer = null
-  viewer?.dispose()
-  viewer = null
+  observers.forEach((o) => o?.disconnect())
+  observers.length = 0
+  viewers.forEach((v) => v?.dispose())
+  viewers.length = 0
+  poses.length = 0
 })
 </script>
 
@@ -172,25 +474,41 @@ onBeforeUnmount(() => {
     @focusin="paused = true"
     @focusout="paused = false"
   >
-    <div class="staff-carousel__card">
-      <!-- 左：3D 虚拟形象（skinview3d 画布，背景透明） -->
-      <div ref="stageRef" class="staff-carousel__stage">
-        <canvas class="staff-carousel__canvas" aria-hidden="true"></canvas>
-        <Transition name="staff-fade">
-          <div v-if="skinMissing" class="staff-carousel__placeholder">
-            皮肤待上传
+    <div class="staff-carousel__viewport">
+      <!-- 滑动轨道：所有成员卡片并排，整体左移完成切换（皮肤预览随页滑动） -->
+      <div
+        class="staff-carousel__track"
+        :style="{ transform: `translateX(-${current * 100}%)` }"
+      >
+        <div
+          v-for="(m, i) in members"
+          :key="m.name"
+          class="staff-carousel__slide"
+          :aria-hidden="i !== current"
+        >
+          <!-- 左：3D 虚拟形象（skinview3d 画布，背景透明，与卡片融为一体），双击重播入场动作 -->
+          <div
+            :ref="(el) => setStageRef(i, el)"
+            class="staff-carousel__stage"
+            title="双击重播动作"
+            @dblclick="playEntrance(i)"
+          >
+            <canvas class="staff-carousel__canvas" aria-hidden="true"></canvas>
+            <Transition name="staff-fade">
+              <div v-if="skinMissing[i]" class="staff-carousel__placeholder">
+                皮肤待上传
+              </div>
+            </Transition>
           </div>
-        </Transition>
-      </div>
 
-      <!-- 右：成员信息 -->
-      <Transition name="staff-fade" mode="out-in">
-        <div :key="current" class="staff-carousel__info">
-          <h3 class="staff-carousel__name">{{ currentMember.name }}</h3>
-          <span class="staff-carousel__role">{{ currentMember.role }}</span>
-          <p class="staff-carousel__bio">{{ currentMember.bio }}</p>
+          <!-- 右：成员信息 -->
+          <div class="staff-carousel__info">
+            <h3 class="staff-carousel__name">{{ m.name }}</h3>
+            <span class="staff-carousel__role">{{ m.role }}</span>
+            <p class="staff-carousel__bio">{{ m.bio }}</p>
+          </div>
         </div>
-      </Transition>
+      </div>
 
       <!-- 左右切换箭头 -->
       <button
@@ -250,31 +568,41 @@ onBeforeUnmount(() => {
   margin: 24px auto;
 }
 
-.staff-carousel__card {
+.staff-carousel__viewport {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  padding: 28px 56px;
   background: var(--vp-c-bg-soft);
   border: 1px solid var(--vp-c-divider);
   border-radius: 14px;
+  overflow: hidden;
   transition: border-color 0.25s;
 }
 
-.staff-carousel__card:hover {
+.staff-carousel__viewport:hover {
   border-color: var(--vp-c-brand-1);
 }
 
-/* —— 3D 形象舞台 —— */
+.staff-carousel__track {
+  display: flex;
+  transition: transform 0.45s cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+.staff-carousel__slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  /* 内边距放在每页自身而非视口：overflow 只裁到视口边界，
+     相邻页（连同其 padding）在静止与滑动过程中都不会从边缘露出 */
+  padding: 28px 56px;
+}
+
+/* —— 3D 形象舞台：透明背景，与卡片背景保持一致；双击可重播入场动作 —— */
 .staff-carousel__stage {
   position: relative;
   flex: 0 0 220px;
   height: 300px;
-  border-radius: 10px;
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
-  overflow: hidden;
+  cursor: pointer;
 }
 
 .staff-carousel__canvas {
@@ -295,8 +623,8 @@ onBeforeUnmount(() => {
     45deg,
     transparent,
     transparent 12px,
-    var(--vp-c-bg-soft) 12px,
-    var(--vp-c-bg-soft) 24px
+    var(--vp-c-bg) 12px,
+    var(--vp-c-bg) 24px
   );
 }
 
@@ -398,27 +726,20 @@ onBeforeUnmount(() => {
   transform: scale(1.25);
 }
 
-/* —— 切换过渡：淡入 + 轻微上移 —— */
+/* —— 占位提示淡入淡出 —— */
 .staff-fade-enter-active,
 .staff-fade-leave-active {
-  transition:
-    opacity 0.28s ease,
-    transform 0.28s ease;
+  transition: opacity 0.28s ease;
 }
 
-.staff-fade-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
+.staff-fade-enter-from,
 .staff-fade-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
 }
 
 /* —— 窄屏：形象与信息上下排列 —— */
 @media (max-width: 640px) {
-  .staff-carousel__card {
+  .staff-carousel__slide {
     flex-direction: column;
     padding: 24px 48px 28px;
   }

@@ -542,6 +542,19 @@ content:
   # 14. 管理组成员（staff/*.md，StaffCarousel.vue 轮播展示，嵌入于 about.md）
   # skin 为成员 Minecraft 皮肤 PNG（64x64 或 64x32），经 CMS 上传到 public/skin/staff/
   # 后自动写入 /skin/staff/<文件名>；未上传或加载失败时组件显示「皮肤待上传」占位提示
+  # 动作配置统一收在 animation 下，分 entrance（入场）与 idle（待机）两个子对象：
+  # 切到该成员（或双击形象）先播 entrance 入场动作，播完一整段后平滑混合到
+  # idle 待机动作并一直保持。入场没有「播放时长」可填 —— 它必须是一次性的，
+  # 要长要短取决于动画文件本身一圈多长（也可用 entrance.speed 调整）。
+  # 入场到待机的过渡时长是站点级参数，全体成员统一，改
+  # .vitepress/theme/config/staffCarousel.ts 的 ENTRANCE_BLEND_SECONDS（秒，0 为瞬间切换）。
+  # entrance.speed 与 idle.speed 各自独立，互不影响；留空即默认值。
+  # 动作名对应项目根 animations/<动作名>.animation.json —— Blockbench「导出动画」得到的
+  # Bedrock 动画格式，这批初始文件由 scripts/bake-animations.mjs 从原先的 skinview3d
+  # 内置动作转换而来。加新动作：文件丢进 animations/，再在下拉里加一条同名选项即可。
+  # 文件里能认的骨骼名：head、body、right_arm、left_arm、right_leg、left_leg、cape、
+  # left_elytra、right_elytra，以及 root（整身的位移与倾倒）。
+  # 文件写着 loop: true 的动作也能当入场用：只播一圈就收，不会转个不停。
   - name: staff
     label: 管理组成员
     type: collection
@@ -557,6 +570,61 @@ content:
       - { name: role, label: 职务, type: string, required: true }
       - { name: bio, label: 一段话简介（单段文字）, type: text, required: true }
       - { name: weight, label: 排序权重（越小越靠前，默认 0）, type: number }
+      - name: animation
+        label: 动作
+        type: object
+        fields:
+          - name: entrance
+            label: 入场动作（切到该成员时播一整段，之后转入待机动作）
+            type: object
+            fields:
+              - name: name
+                label: 动作
+                type: select
+                default: none
+                options:
+                  values:
+                    - { name: none, label: 无（一直显示待机动作） }
+                    - { name: walk, label: 走路 }
+                    - { name: run, label: 跑步 }
+                    - { name: fly, label: 飞翔 }
+                    - { name: wave_left, label: 挥手（左手） }
+                    - { name: wave_right, label: 挥手（右手） }
+                    - { name: crouch, label: 潜行（蹲下） }
+                    - { name: hit, label: 攻击（挥击） }
+                    - { name: swim, label: 游泳 }
+                    - { name: idle, label: 待机（轻微呼吸摆动） }
+              - name: speed
+                label: 播放速度（1 为原速，越小越慢；入场动作要播完一整段，不能填 0）
+                type: number
+                default: 1
+                options:
+                  min: 0.01
+          - name: idle
+            label: 待机动作（入场动作播完后一直保持）
+            type: object
+            fields:
+              - name: name
+                label: 动作
+                type: select
+                default: idle
+                options:
+                  values:
+                    - { name: idle, label: 待机（轻微呼吸摆动） }
+                    - { name: walk, label: 走路 }
+                    - { name: run, label: 跑步 }
+                    - { name: fly, label: 飞翔 }
+                    - { name: wave_left, label: 挥手（左手） }
+                    - { name: wave_right, label: 挥手（右手） }
+                    - { name: crouch, label: 潜行（蹲下） }
+                    - { name: hit, label: 攻击（挥击） }
+                    - { name: swim, label: 游泳 }
+              - name: speed
+                label: 播放速度（1 为原速，越小越慢；填 0 定格在起始姿势）
+                type: number
+                default: 0.7
+                options:
+                  min: 0
       - name: skin
         label: 皮肤 PNG
         type: image

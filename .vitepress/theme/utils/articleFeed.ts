@@ -23,27 +23,104 @@ export const CATEGORY_LABELS: Record<string, string> = {
 }
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/
-const KV_RE = /^([A-Za-z0-9_-]+):[ \t]*(.*)$/
-const ITEM_RE = /^[ \t]+-[ \t]*(.+)$/
+const KEY_RE = /^([A-Za-z0-9_-]+):[ \t]*(.*)$/
+const ITEM_RE = /^-[ \t]*(.*)$/
+const SEQ_RE = /^-[ \t]/
 const IMAGE_RE = /!\[[^\]]*\]\(([^)\s]+)[^)]*\)/g
 const COVER_LINK_RE = /(?:^|\n)[ \t]*\[头图\]\(([^)\s]+)[^)]*\)/
 
-export function parseFrontmatter(raw: string) {
-  const data: Record<string, string | string[]> = {}
-  const m = FRONTMATTER_RE.exec(raw)
-  if (!m) return { data, body: raw }
-  let key: string | null = null
-  for (const line of m[1].split(/\r?\n/)) {
-    const kv = KV_RE.exec(line)
-    if (kv) {
-      key = kv[1]
-      const value = kv[2].trim().replace(/^(['"])(.*)\1$/, '$2')
-      data[key] = value === '' ? [] : value
+/**
+ * frontmatter 用到的 YAML 子集：嵌套映射、标量、标量列表。
+ * （列表元素本身是映射的写法只取原始字符串，目前站点没有数据源依赖它）
+ */
+export type YamlValue = string | YamlValue[] | { [key: string]: YamlValue }
+
+interface Line {
+  /** 行首缩进列数 */
+  indent: number
+  /** 去掉缩进与注释后的内容 */
+  text: string
+  /** 是否为 `- xxx` 序列项 */
+  seq: boolean
+}
+
+const unquote = (v: string) => v.replace(/^(['"])(.*)\1$/, '$2')
+
+function toLines(block: string): Line[] {
+  const lines: Line[] = []
+  for (const line of block.split(/\r?\n/)) {
+    const text = line.trim()
+    if (!text || text.startsWith('#')) continue
+    lines.push({ indent: line.search(/\S/), text, seq: SEQ_RE.test(text) })
+  }
+  return lines
+}
+
+/** 解析一段同缩进的 `key: value`；值为空的键递归收下它的子块 */
+function parseMap(lines: Line[], start: number, indent: number): [Record<string, YamlValue>, number] {
+  const out: Record<string, YamlValue> = {}
+  let i = start
+  while (i < lines.length) {
+    const line = lines[i]
+    // 缩进退回上一级说明本层结束，剩下的行交给外层
+    if (line.indent < indent) break
+    // 同层里更深的行（如列表元素是映射的续行）跳过，别把后面的字段一起带没了
+    if (line.indent !== indent || line.seq) {
+      i++
       continue
     }
-    const item = ITEM_RE.exec(line)
-    if (item && key && Array.isArray(data[key])) data[key].push(item[1].trim())
+    const kv = KEY_RE.exec(line.text)
+    if (!kv) {
+      i++
+      continue
+    }
+    const inline = unquote(kv[2].trim())
+    if (inline) {
+      out[kv[1]] = inline
+      i++
+      continue
+    }
+    const [child, next] = parseNested(lines, i + 1, indent)
+    out[kv[1]] = child
+    i = next
   }
+  return [out, i]
+}
+
+/** 键或序列项之后紧跟的子块：更深一级才算有内容，否则是空值 */
+function parseNested(lines: Line[], start: number, parentIndent: number): [YamlValue, number] {
+  const first = lines[start]
+  if (!first) return [[], start]
+  // YAML 允许序列项与键同缩进
+  if (first.seq && first.indent >= parentIndent) return parseSeq(lines, start, first.indent)
+  if (first.indent <= parentIndent) return [[], start]
+  return first.seq ? parseSeq(lines, start, first.indent) : parseMap(lines, start, first.indent)
+}
+
+function parseSeq(lines: Line[], start: number, indent: number): [YamlValue[], number] {
+  const out: YamlValue[] = []
+  let i = start
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.indent !== indent || !line.seq) break
+    const item = ITEM_RE.exec(line.text)?.[1].trim() ?? ''
+    if (item) {
+      out.push(unquote(item))
+      i++
+      continue
+    }
+    const [child, next] = parseNested(lines, i + 1, indent)
+    out.push(child)
+    i = next
+  }
+  return [out, i]
+}
+
+export function parseFrontmatter(raw: string) {
+  const m = FRONTMATTER_RE.exec(raw)
+  if (!m) return { data: {} as Record<string, YamlValue>, body: raw }
+  const lines = toLines(m[1])
+  const [data] = parseMap(lines, 0, lines[0]?.indent ?? 0)
   return { data, body: raw.slice(m[0].length) }
 }
 
@@ -87,8 +164,11 @@ function extractImages(body: string, dir: string): string[] {
   return images
 }
 
-const asList = (v: string | string[] | undefined): string[] =>
-  Array.isArray(v) ? v : typeof v === 'string' && v !== '' ? [v] : []
+const asList = (v: YamlValue | undefined): string[] => {
+  if (typeof v === 'string') return v === '' ? [] : [v]
+  if (Array.isArray(v)) return v.filter((item): item is string => typeof item === 'string')
+  return []
+}
 
 // entries: [globKey, rawText] 对，如 ['/blogs/foo.md', '---\n...']
 export function buildArticles(
