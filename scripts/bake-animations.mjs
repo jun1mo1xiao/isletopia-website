@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 // 把 skinview3d 内置动作烘焙成 Blockbench 可编辑的 .animation.json（Bedrock 动画格式）。
 //
-//   node scripts/bake-animations.mjs
+// 用法：npm run animations:bake            烘全部动作， ACTIONS 里标了 keep 的除外
+//       npm run animations:bake -- walk hit  只烘点名过的，keep 的点名也照写
 //
 // 输出到项目根 animations/<动作名>.animation.json，StaffCarousel.vue 构建期读取。
-// 这些文件是转换产物，可以直接用 Blockbench 打开继续编辑；重新执行本脚本会整体覆盖。
+// 这些文件是转换产物，可以直接用 Blockbench 打开继续编辑。
 // 例外：animations/wave_right 已按手感手改（连摇三下后甩开停住），本脚本烘不出这个形状，
-// 重跑前要么先备份，要么把这里的 wave() 换成想要的样子。
+// 所以在 ACTIONS 里标了 keep: true，不带参数跑不会冲掉它。
 //
 // 做法：按 libs/animation.js（skinview3d 3.4.2）里的公式逐帧采样，每帧先从绑定姿势
 // 出发（等价于 viewer 每帧的 resetJoints），再取相对绑定姿势的增量。
 // 坐标与单位换算和 .vitepress/theme/utils/blockbenchAnimation.ts 里的映射互为逆运算：
 //   旋转 (x, -y, -z) 且弧度换度数；位置 (x, -y, -z)（单位都是 1 像素）。
+// 顺序也得对上：Blockbench 的 Bedrock 格式按 Rz·Ry·Rx（ZYX）合成三个角，播放器照此解，
+// 而动作公式给出的是 three.js 的 XYZ 序，所以旋转落盘前先用 xyzToZyx() 换一种分解方式，
+// 同一个旋转、观感不变，只是让 Blockbench 打开后看到的和网页一样。
 //
 // 与原实现的三处有意的差别（都为了能整周期无缝循环，观感不变）：
 //   1. walk：head.rotation.x 原为 sin(progress*1.6)，一个循环里不是整数个周期，
@@ -28,7 +32,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(ROOT, 'animations')
 
 const PI = Math.PI
-const { sin, cos, abs, atan2, sqrt, min, max, pow } = Math
+const { sin, cos, abs, atan2, asin, sqrt, min, max, pow } = Math
 const CAPE_BIND_X = (10.8 * PI) / 180
 
 // 绑定姿势（取自 skinview3d libs/model.js 的 resetJoints），three.js 空间、绝对值
@@ -196,8 +200,7 @@ function quatToEulerXYZ(q) {
   const m02 = 2 * (x * z + w * y)
   const m12 = 2 * (y * z - w * x)
   const m22 = 1 - 2 * (x * x + y * y)
-  const clamp = (v) => min(max(v, -1), 1)
-  return [atan2(-m12, m22), Math.asin(clamp(m02)), atan2(-m01, m00)]
+  return [atan2(-m12, m22), asin(clamp(m02)), atan2(-m01, m00)]
 }
 
 const SWIM_PERIOD = 1.3
@@ -263,7 +266,7 @@ const ACTIONS = [
   // 飞翔是一次性展开（0.9^t 渐近收敛），用非均匀网格并停在最后一帧
   { name: 'fly', fn: fly, loop: false, grid: [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25, 1.5, 2, 2.5, 3, 3.5] },
   { name: 'wave_left', fn: wave('left'), length: 2, samples: 32 },
-  { name: 'wave_right', fn: wave('right'), length: 2, samples: 32 },
+  { name: 'wave_right', fn: wave('right'), length: 2, samples: 32, keep: true },
   // 潜行同理：0.125 秒蹲到位后保持，之后几个时间点只是把姿势钉住
   { name: 'crouch', fn: crouch, loop: false, grid: [0, 0.016, 0.031, 0.047, 0.063, 0.078, 0.094, 0.125, 0.141, 0.25, 0.5] },
   { name: 'hit', fn: hit, length: (2 * PI) / 18, samples: 24 },
@@ -279,6 +282,32 @@ const round = (v, digits = 4) => {
 const timecode = (t) => {
   const v = round(t)
   return Number.isInteger(v) ? `${v}.0` : `${v}`
+}
+
+const clamp = (v) => min(max(v, -1), 1)
+
+/**
+ * three.js 的 XYZ 序欧拉角 -> 同一个旋转在 ZYX 序下的三个角（都是弧度）。
+ * 矩阵元素取自 R = Rx·Ry·Rz 的解析式，抽取分支与 three.js
+ * Euler.setFromRotationMatrix(…, 'ZYX') 一致，和播放器里的 zyxToXyz() 互为逆运算。
+ */
+function xyzToZyx(x, y, z) {
+  const cx = cos(x)
+  const sx = sin(x)
+  const cy = cos(y)
+  const sy = sin(y)
+  const cz = cos(z)
+  const sz = sin(z)
+  const m31 = clamp(sx * sz - cx * sy * cz) // M[2][0]
+  const out = [0, -asin(m31), 0]
+  if (abs(m31) < 0.9999999) {
+    out[0] = atan2(sx * cz + cx * sy * sz, cx * cy) // M[2][1], M[2][2]
+    out[2] = atan2(cx * sz + sx * sy * cz, cy * cz) // M[1][0], M[0][0]
+  } else {
+    out[0] = 0
+    out[2] = atan2(cy * sz, cx * cz - sx * sy * sz) // -M[0][1], M[1][1]
+  }
+  return out
 }
 
 /** 采样结果 -> 每条骨骼每个通道的关键帧列表（已换到 Bedrock 文件空间） */
@@ -298,11 +327,10 @@ function bake(action) {
       const deltaP = p.map((v, i) => v - bind.p[i])
       const deltaR = r.map((v, i) => v - bind.r[i])
       for (const [channel, three] of [['rotation', deltaR], ['position', deltaP]]) {
-        // three -> Bedrock：同样取 (x, -y, -z)，旋转再换回度数
+        // three -> Bedrock：先换成 ZYX 序，再取 (x, -y, -z)，旋转换回度数
+        const [rx, ry, rz] = channel === 'rotation' ? xyzToZyx(three[0], three[1], three[2]) : three
         const value =
-          channel === 'rotation'
-            ? [three[0] / DEG, -three[1] / DEG, -three[2] / DEG]
-            : [three[0], -three[1], -three[2]]
+          channel === 'rotation' ? [rx / DEG, -ry / DEG, -rz / DEG] : [rx, -ry, -rz]
         const key = `${bone}.${channel}`
         const track = tracks.get(key) ?? { bone, channel, points: [] }
         track.points.push({ time: t, value: value.map((v) => round(v)) })
@@ -401,8 +429,14 @@ function verify(action, json) {
 }
 
 mkdirSync(OUT_DIR, { recursive: true })
+// 不带参数：只烘脚本能对上的动作，keep 标记的（手改过的）跳过；点名了就直接写
+const only = process.argv.slice(2)
+const unknown = only.filter((name) => !ACTIONS.some((a) => a.name === name))
+if (unknown.length) throw new Error(`不认识的动作名：${unknown.join('、')}`)
+const selected = only.length ? ACTIONS.filter((a) => only.includes(a.name)) : ACTIONS.filter((a) => !a.keep)
+const skipped = ACTIONS.filter((a) => !selected.includes(a))
 const lines = []
-for (const action of ACTIONS) {
+for (const action of selected) {
   const json = toJson(action)
   verify(action, json)
   // 三元组排成一行，便于人肉比对与 Blockbench 之外的手工微调
@@ -425,4 +459,5 @@ for (const action of ACTIONS) {
   )
 }
 console.log(lines.join('\n'))
+if (skipped.length) console.log(`\n已跳过（手改过的，需要重烘就点名）：${skipped.map((a) => a.name).join('、')}`)
 console.log(`\n已写入 ${OUT_DIR}`)

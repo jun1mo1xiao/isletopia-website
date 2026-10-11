@@ -9,7 +9,8 @@
     "docs:build": "vitepress build",
     "docs:preview": "vitepress preview",
     "deploy": "node scripts/deploy.mjs",
-    "deploy:dry": "node scripts/deploy.mjs --dry-run"
+    "deploy:dry": "node scripts/deploy.mjs --dry-run",
+    "animations:bake": "node scripts/bake-animations.mjs"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.8.0",

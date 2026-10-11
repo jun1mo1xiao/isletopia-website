@@ -15,6 +15,13 @@
 //   Bedrock 的 Y 轴朝下、Z 轴朝模型背后，skinview3d 是 Y 朝上、Z 朝脸（人物面向 +Z），
 //   两者相差一个绕 X 轴 180° 的旋转，所以位置和旋转都取 (x, -y, -z)，
 //   旋转另外把度数换成弧度。这条映射是自身的逆运算，正反向共用即可。
+//
+// 旋转顺序：Blockbench 的 Bedrock 格式把三个角按 ZYX 序合成（R = Rz·Ry·Rx，
+// 见 Blockbench 的 js/io/format.ts 里 euler_order 的默认值与 js/animations/keyframe.js），
+// 而 three.js 形象上的 rotation 是 XYZ 序。(x, -y, -z) 换的是轴，换不掉合成顺序：
+// 只动一根轴的骨骼看不出差别，X 和 Z 同时有值的骨骼（挥手的手臂）会挥向反方向，
+// 偏航占主导的头部则几乎没差别。落值前把同一个旋转在 XYZ 序下重新分解一次，
+// 网页、Blockbench 预览和真实 Bedrock 游戏三方就对齐了。
 import type { PlayerObject } from 'skinview3d'
 
 const DEG_TO_RAD = Math.PI / 180
@@ -102,12 +109,38 @@ function keyValue(v: unknown): number[] | null {
   return null
 }
 
-/** 文件空间 -> skinview3d 空间：度数换弧度、y 与 z 取反 */
+/** 文件空间 -> skinview3d 空间：度数换弧度、y 与 z 取反（顺序仍是 Blockbench 的 ZYX） */
 function toRigSpace(channel: ChannelName, v: number[]): number[] {
   const [x, y, z] = v
   return channel === 'rotation'
     ? [x * DEG_TO_RAD, -y * DEG_TO_RAD, -z * DEG_TO_RAD]
     : [x, -y, -z]
+}
+
+const clampAngle = (v: number) => (v < -1 ? -1 : v > 1 ? 1 : v)
+
+/**
+ * 把按 ZYX 序合成的三个角重新分解成形象使用的 XYZ 序（同一个旋转，两种写法）。
+ * 矩阵元素取自 R = Rz·Ry·Rx 的解析式，抽取分支与 three.js
+ * Euler.setFromRotationMatrix(…, 'XYZ') 一致；万向锁那一支照 three.js 写 z = 0。
+ */
+function zyxToXyz(x: number, y: number, z: number, out: number[]) {
+  const cx = Math.cos(x)
+  const sx = Math.sin(x)
+  const cy = Math.cos(y)
+  const sy = Math.sin(y)
+  const cz = Math.cos(z)
+  const sz = Math.sin(z)
+  // M[0][2]
+  const m13 = clampAngle(cz * sy * cx + sz * sx)
+  out[1] = Math.asin(m13)
+  if (Math.abs(m13) < 0.9999999) {
+    out[0] = Math.atan2(-(sz * sy * cx - cz * sx), cy * cx) // M[1][2], M[2][2]
+    out[2] = Math.atan2(-(cz * sy * sx - sz * cx), cz * cy) // M[0][1], M[0][0]
+  } else {
+    out[0] = Math.atan2(cy * sx, sz * sy * sx + cz * cx) // M[2][1], M[1][1]
+    out[2] = 0
+  }
 }
 
 function buildTrack(channel: ChannelName, raw: unknown): Track | null {
@@ -181,7 +214,10 @@ export class BlockbenchAnimation implements RigAnimation {
   progress = 0
   /** 绑定姿势基线，首次 update 时从形象上读 */
   private baseline: Map<string, { position: number[]; rotation: number[] }> | null = null
+  /** 采样出的增量，Blockbench 的 ZYX 序 */
   private readonly out = [0, 0, 0]
+  /** out 换成形象用的 XYZ 序，避免每帧新建数组 */
+  private readonly xyz = [0, 0, 0]
 
   /**
    * @param animation 编译好的动画
@@ -218,10 +254,11 @@ export class BlockbenchAnimation implements RigAnimation {
       if (!node || !base) continue
       this.sample(track, t, loop ? length : 0)
       if (channel === 'rotation') {
+        zyxToXyz(this.out[0], this.out[1], this.out[2], this.xyz)
         node.rotation.set(
-          base.rotation[0] + this.out[0],
-          base.rotation[1] + this.out[1],
-          base.rotation[2] + this.out[2]
+          base.rotation[0] + this.xyz[0],
+          base.rotation[1] + this.xyz[1],
+          base.rotation[2] + this.xyz[2]
         )
       } else {
         node.position.set(
