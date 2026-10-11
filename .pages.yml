@@ -668,28 +668,37 @@ content:
 #   cancelable  是否允许取消运行，默认 true
 # 前置条件：.github/workflows/ 下对应的工作流必须已存在于 ref 指定的分支上
 # （本仓库即 main），按钮才会出现在 Actions 页。
-# publish 还需一次配置：deploy 分支开了「Require a pull request before merging」，
-# 默认令牌的 github-actions[bot] 身份不是管理员、推送会被拒。请在
-# Settings → Secrets and variables → Actions 新增仓库 secret DEPLOY_TOKEN，
-# 值为属主本人的 fine-grained PAT（Repository access 限定本仓库，
-# Permissions 只给 Contents: Read and write）。配一次即可长期生效。
+# 两个按钮还需各配一次 secret（Settings → Secrets and variables → Actions）：
+#   CLOUDFLARE_PREVIEW_HOOK  Cloudflare 项目 → 设置 → 构建 → 添加 Deploy Hook，
+#                            Branch to build 填 main，把生成的 URL 存进来。
+#                            供「Cloudflare 预览 main」使用，无需 API 令牌。
+#   DEPLOY_TOKEN             供「发布到线上」使用：deploy 分支开了
+#                            「Require a pull request before merging」，默认令牌的
+#                            github-actions[bot] 身份不是管理员、推送会被拒，需要一个
+#                            属主本人的 fine-grained PAT（限定本仓库，
+#                            权限只给 Contents: Read and write）。
 # -----------------------------------------------------------------------------
 actions:
-  - name: publish
-    label: 发布到线上（Cloudflare Pages）
+  # 日常最常用：改完内容先构建一次 main 看效果，只出预览地址，不碰线上
+  - name: cf-preview
+    label: Cloudflare 预览 main
+    workflow: preview.yml
+    ref: main
+  - name: cloudflare-publish
+    label: 发布到线上 (Cloudflare Pages)
     workflow: publish.yml
     ref: main
     confirm:
-      title: 把 main 发布到线上？
+      title: 发布到线上 (Cloudflare Pages)？
       message: 将 deploy 分支快进到 main 的最新提交，Cloudflare Pages 随即构建一次。若 deploy 含有 main 之外的提交则拒绝执行。
       button: 发布
-  - name: build-github-pages
-    label: 构建 GitHub Pages 预览
+  - name: github-publish
+    label: 发布到线上 (GitHub Pages线上镜像)
     workflow: pages.yml
     ref: main
     confirm:
-      title: 构建 GitHub Pages 预览？
-      message: 从 deploy 分支构建并部署到 https://tobbylowrie.github.io/isletopia-website/ ，内容与线上站点一致。
+      title: 发布到线上 (GitHub Pages线上镜像)？
+      message: 从 deploy 分支构建并部署到 https://tobbylowrie.github.io/isletopia-website/ ，内容与线上站点一致；想预览 main 请用「Cloudflare 预览 main」。
       button: 构建
 
 # -----------------------------------------------------------------------------
