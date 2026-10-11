@@ -1,6 +1,8 @@
 // 文档侧边栏（唯一数据源）：wiki 全量启用（新手必看/高手必看已并入）；分组可折叠、默认收起
 // （collapsed: true），当前页所在分组挂载/切页时会自动展开。其他根级路径（blogs、
 // changelog 等）不匹配任何 key，不受影响。
+// 分组的入口页统一是该分类下的 wiki/<分类>/总览.md，列为 items 的第一项；分组本身不挂
+// link（点标题只负责展开收起），目录里「总览」与文章平级可见。
 // 消费方：config.mts（themeConfig.sidebar，另「活动」分组由 config 扫描 events/ 生成）。
 // 增删页面条目、调整分组只动这里；注意新增页面后要在这里同步登记，否则页面左侧无目录。
 
@@ -11,9 +13,9 @@ export const SIDEBAR: DefaultTheme.Sidebar = {
     { text: 'Wiki 总览', link: '/wiki/' },
     {
       text: '新手必看教程（入门）',
-      link: '/wiki/新手必看/',
       collapsed: true,
       items: [
+        { text: '总览', link: '/wiki/新手必看/总览' },
         { text: '入服教程', link: '/wiki/新手必看/入服教程' },
         { text: '特色玩法', link: '/wiki/新手必看/特色玩法' },
         { text: '规则', link: '/wiki/新手必看/规则' }
@@ -29,9 +31,9 @@ export const SIDEBAR: DefaultTheme.Sidebar = {
     },
     {
       text: '岛屿',
-      link: '/wiki/空岛类型/',
       collapsed: true,
       items: [
+        { text: '总览', link: '/wiki/空岛类型/总览' },
         { text: '经典空岛', link: '/wiki/空岛类型/经典空岛' },
         { text: '单方块空岛', link: '/wiki/空岛类型/单方块空岛' },
         { text: '随机空岛', link: '/wiki/空岛类型/随机空岛' },
@@ -86,9 +88,9 @@ export const SIDEBAR: DefaultTheme.Sidebar = {
     },
     {
       text: '便利功能',
-      link: '/wiki/便利功能/',
       collapsed: true,
       items: [
+        { text: '总览', link: '/wiki/便利功能/总览' },
         { text: '自动铺路', link: '/wiki/便利功能/自动铺路' },
         { text: '铁电梯', link: '/wiki/便利功能/铁电梯' },
         { text: '铁路传送', link: '/wiki/便利功能/铁路传送' },
@@ -120,9 +122,9 @@ export const SIDEBAR: DefaultTheme.Sidebar = {
     },
     {
       text: '服务器小游戏',
-      link: '/wiki/服务器小游戏/',
       collapsed: true,
       items: [
+        { text: '总览', link: '/wiki/服务器小游戏/总览' },
         { text: '通用游玩流程', link: '/wiki/服务器小游戏/通用游玩流程' },
         { text: '掘一死战', link: '/wiki/服务器小游戏/掘一死战' },
         { text: '消失的羊毛', link: '/wiki/服务器小游戏/消失的羊毛' },
