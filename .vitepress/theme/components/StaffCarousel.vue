@@ -11,7 +11,17 @@
 // animations/*.animation.json（播放器见 utils/blockbenchAnimation）。
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { parseFrontmatter, type YamlValue } from '../utils/articleFeed'
-import { ENTRANCE_BLEND_SECONDS, ENTRANCE_DELAY_MS } from '../config'
+import {
+  CAMERA_PITCH_DEG,
+  CAMERA_YAW_DEG,
+  CAROUSEL_INTERVAL_MS,
+  DEFAULT_ENTRANCE_SPEED,
+  DEFAULT_IDLE_SPEED,
+  ENTRANCE_BLEND_SECONDS,
+  ENTRANCE_DELAY_MS,
+  ORTHO_LIKE_FOV,
+  ORTHO_LIKE_ZOOM
+} from '../config'
 import {
   BlockbenchAnimation,
   compileAnimation,
@@ -20,10 +30,9 @@ import {
   type RigNode
 } from '../utils/blockbenchAnimation'
 
-// 自动轮播间隔（ms），可通过 <StaffCarousel :interval="8000" /> 覆盖
-const props = withDefaults(defineProps<{ interval?: number }>(), {
-  interval: 5000
-})
+// 自动轮播间隔：不传就用站点配置 CAROUSEL_INTERVAL_MS，
+// 可通过 <StaffCarousel :interval="8000" /> 覆盖
+const props = defineProps<{ interval?: number }>()
 
 // 动作配置整体收在 frontmatter 的 animation 节点下，分入场与待机两段，
 // 各自的 name（动画文件名，即 animations/<name>.animation.json）与 speed 互不影响。
@@ -43,11 +52,7 @@ interface StaffMember {
   animation: StaffAnimation
 }
 
-// 入场按原速播放；待机放慢到 0.7 倍速，卡片里看着更稳
-const DEFAULT_ENTRANCE_SPEED = 1
-const DEFAULT_IDLE_SPEED = 0.7
-
-// 留空或非法值回退默认值
+// 留空或非法值回退默认值（默认倍数见 config/staffCarousel.ts）
 function parseNumber(raw: unknown, fallback: number, min: number): number {
   const text = String(raw ?? '').trim()
   if (!text) return fallback
@@ -163,7 +168,7 @@ function startTimer() {
   if (count <= 1) return
   timer = window.setInterval(() => {
     if (!paused.value) current.value = (current.value + 1) % count
-  }, props.interval)
+  }, props.interval ?? CAROUSEL_INTERVAL_MS)
 }
 // 手动切换后重置计时，避免刚看完一位立刻被切走
 function restartTimer() {
@@ -204,16 +209,8 @@ function loadSkin(i: number) {
     })
 }
 
-// 正交观感：skinview3d 内部固定使用 PerspectiveCamera，无法换成 OrthographicCamera，
-// 这里用「极小 fov + 等比拉远」逼近正交投影。可见高度 = 9·tan(fov/2) + 33/zoom，
-// 取 fov 10°、zoom 0.7725 使取景与原先的 fov 55 / zoom 0.85 完全一致；
-// 对应相机距离约 249，仍在 skinview3d 内部 10~256 的限幅内（再小就会被卡住而放大画面）。
-const ORTHO_LIKE_FOV = 10
-const ORTHO_LIKE_ZOOM = 0.7725
-
-// 相机朝向（度）：yaw 绕竖直轴水平转，pitch 向上抬升；改这两个常量即可换视角
-const CAMERA_YAW_DEG = -30
-const CAMERA_PITCH_DEG = 20
+// 取景（ORTHO_LIKE_FOV / ORTHO_LIKE_ZOOM）与相机朝向（CAMERA_YAW_DEG / CAMERA_PITCH_DEG）
+// 都是站点配置，见 config/staffCarousel.ts
 
 // 沿指定方向重摆相机。距离取 skinview3d 已按 fov/zoom 算好的值，只改方向不改距离，
 // 取景大小因此不变；朝向由 OrbitControls.update() 按 target 重新 lookAt
