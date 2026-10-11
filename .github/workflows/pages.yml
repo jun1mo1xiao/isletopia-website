@@ -10,6 +10,15 @@ name: Pages
 
 on:
   workflow_dispatch:
+    inputs:
+      # 供 Pages CMS 的「构建 GitHub Pages 预览」按钮调度：CMS 只传一个名为
+      # payload 的输入（JSON 字符串），未声明的输入会让调度被 GitHub 拒绝。
+      # 工作流本身不使用它。
+      payload:
+        description: Pages CMS 传入的触发上下文（JSON），本工作流不使用
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read

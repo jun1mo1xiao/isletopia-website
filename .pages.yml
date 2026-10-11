@@ -654,6 +654,45 @@ content:
           media: skins
 
 # -----------------------------------------------------------------------------
+# 按钮动作（actions）
+# Pages CMS 的 action 只做一件事：对指定的 GitHub Actions 工作流发一次
+# workflow_dispatch。按钮出现在仓库左侧的 Actions 页，点了才构建一次，
+# 因此无需给站点开「每次提交自动构建」——main 上频繁的 CMS 保存不触发构建。
+# 调度时 CMS 固定传一个名为 payload 的输入（JSON，含触发者与所在条目信息），
+# 所以对应工作流必须声明 inputs.payload，否则 GitHub 会以 422 拒绝。
+#   name/label  动作标识（字母数字与 - _）与按钮文字
+#   workflow    工作流文件名，写在哪个 ref 上由 ref 决定
+#   ref         在哪个分支跑该工作流；省略即 CMS 当前分支
+#   scope       按钮位置：collection / entry；省略则出现在全局 Actions 页
+#   confirm     点击前的二次确认框（发布这类动作务必加）
+#   cancelable  是否允许取消运行，默认 true
+# 前置条件：.github/workflows/ 下对应的工作流必须已存在于 ref 指定的分支上
+# （本仓库即 main），按钮才会出现在 Actions 页。
+# publish 还需一次配置：deploy 分支开了「Require a pull request before merging」，
+# 默认令牌的 github-actions[bot] 身份不是管理员、推送会被拒。请在
+# Settings → Secrets and variables → Actions 新增仓库 secret DEPLOY_TOKEN，
+# 值为属主本人的 fine-grained PAT（Repository access 限定本仓库，
+# Permissions 只给 Contents: Read and write）。配一次即可长期生效。
+# -----------------------------------------------------------------------------
+actions:
+  - name: publish
+    label: 发布到线上（Cloudflare Pages）
+    workflow: publish.yml
+    ref: main
+    confirm:
+      title: 把 main 发布到线上？
+      message: 将 deploy 分支快进到 main 的最新提交，Cloudflare Pages 随即构建一次。若 deploy 含有 main 之外的提交则拒绝执行。
+      button: 发布
+  - name: build-github-pages
+    label: 构建 GitHub Pages 预览
+    workflow: pages.yml
+    ref: main
+    confirm:
+      title: 构建 GitHub Pages 预览？
+      message: 从 deploy 分支构建并部署到 https://tobbylowrie.github.io/isletopia-website/ ，内容与线上站点一致。
+      button: 构建
+
+# -----------------------------------------------------------------------------
 # 全局设置
 # -----------------------------------------------------------------------------
 settings:

@@ -1,0 +1,78 @@
+# 一键发布：把 main 快进合并到 deploy 分支，等同于本地 `npm run deploy`。
+#
+# - Cloudflare Pages 的生产分支指向 deploy，收到 deploy 的新提交才构建一次，
+#   所以 main 上频繁的内容提交（Pages CMS 每次保存都产生提交）不会触发构建。
+# - 由 Pages CMS 的「发布到线上」按钮调度，也可本地 `gh workflow run publish.yml`。
+# - 只允许快进：deploy 含 main 之外的提交时直接失败退出，绝不强推。
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      # Pages CMS 触发任何工作流时都只传一个名为 payload 的输入（JSON 字符串，
+      # 内含触发者、动作名、所在条目等上下文）。工作流必须声明它，
+      # 否则 GitHub 会以 422 拒绝调度；这里仅打印出来便于追溯。
+      payload:
+        description: Pages CMS 传入的触发上下文（JSON），仅用于日志
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: 快进 main → deploy
+        env:
+          PAYLOAD: ${{ inputs.payload }}
+          # deploy 分支开了保护（Require a pull request before merging），
+          # 默认令牌是 github-actions[bot] 身份、不属于管理员，推送会被拒。
+          # 因此优先用仓库 Secrets 里的 DEPLOY_TOKEN（属主本人的 fine-grained PAT，
+          # 只给 Contents: Read and write，限定本仓库）——管理员身份可绕过该保护。
+          # 若不愿建 PAT，也可改为在 deploy 的分支保护里给 Actions 加 bypass 名单。
+          PUSH_TOKEN: ${{ secrets.DEPLOY_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$PAYLOAD" ]; then
+            echo "▸ 触发者：$(echo "$PAYLOAD" | jq -r '.triggeredBy.githubUsername // .triggeredBy.name // "unknown"')"
+          else
+            echo "▸ 手动触发（gh workflow run 或 Actions 页面）"
+          fi
+
+          git fetch origin main deploy --no-tags
+          MAIN=$(git rev-parse origin/main)
+          DEPLOY=$(git rev-parse origin/deploy)
+
+          if [ "$MAIN" = "$DEPLOY" ]; then
+            echo "✓ deploy 已与 main 一致（$(git log -1 --format=%h origin/main)），不推送、不触发新构建"
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "$DEPLOY" "$MAIN"; then
+            echo "✗ deploy 含有 main 之外的提交，快进发布会丢历史，已中止。"
+            echo "  先把 deploy 上的改动合并回 main，再重新发布。"
+            exit 1
+          fi
+
+          echo "▸ 发布 main → deploy：$(git log -1 --format=%h origin/deploy)..$(git log -1 --format=%h origin/main)「$(git log -1 --format=%s origin/main)」"
+          if ! git push "https://x-access-token:${PUSH_TOKEN}@github.com/${{ github.repository }}.git" \
+            "refs/remotes/origin/main:refs/heads/deploy"; then
+            echo "✗ 推送 deploy 失败。最常见原因是 deploy 的分支保护拒绝本次身份："
+            echo "  建一个属主本人的 fine-grained PAT（Contents: Read and write，限定本仓库），"
+            echo "  存为仓库 Secrets 的 DEPLOY_TOKEN 后重试。"
+            exit 1
+          fi
+          echo "✓ 已发布，Cloudflare Pages 将构建一次并上线"
