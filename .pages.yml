@@ -681,25 +681,29 @@ content:
 actions:
   # 日常最常用：改完内容先构建一次 main 看效果，只出预览地址，不碰线上
   - name: cf-preview
-    label: Cloudflare 预览 main
+    label: 发布到 CF-Pages（预览）
     workflow: preview.yml
     ref: main
+    confirm:
+      title: 确认在 Cloudflare 执行 main 分支构建 （预览分支）
+      message: 请务必确认所有在 pagecms 上的修改都已经保存成功。执行后，通过 https://main.isletopia-website.pages.dev/ 查看预览效果。
+      button: 确认并执行
   - name: cloudflare-publish
-    label: 发布到线上 (Cloudflare Pages)
+    label: 发布到 CF-Pages (线上)
     workflow: publish.yml
     ref: main
     confirm:
-      title: 发布到线上 (Cloudflare Pages)？
-      message: 将 deploy 分支快进到 main 的最新提交，Cloudflare Pages 随即构建一次。若 deploy 含有 main 之外的提交则拒绝执行。
+      title: 确认在 Cloudflare Pages 执行 deploy 分支构建 （线上分支）
+      message: 请务必确认所有在 pagecms 上的修改都已经保存成功，并且已经通过 “发布到 CF-Pages（预览）” 进行网站预览，确保没有BUG。执行后，将 deploy 分支快进到 main 的最新提交，Cloudflare Pages 随即构建一次。若 deploy 含有 main 之外的提交则拒绝执行。线上地址为： https://menghuanzhiyu.com/ 。
       button: 发布
   - name: github-publish
-    label: 发布到线上 (GitHub Pages线上镜像)
+    label: 发布到 GH-Pages (线上，备用)
     workflow: pages.yml
     ref: main
     confirm:
-      title: 发布到线上 (GitHub Pages线上镜像)？
-      message: 从 deploy 分支构建并部署到 https://tobbylowrie.github.io/isletopia-website/ ，内容与线上站点一致；想预览 main 请用「Cloudflare 预览 main」。
-      button: 构建
+      title: 确认在 GitHub Pages 执行 deploy 分支构建 （备用线上分支）
+      message: 请务必确认所有在 pagecms 上的修改都已经保存成功，并且已经通过 “发布到 CF-Pages（预览）” 进行网站预览，确保没有BUG。执行后，将从 deploy 分支构建并部署到 https://tobbylowrie.github.io/isletopia-website/ 。注意本按钮取的是 deploy 分支，需先执行 “发布到 CF-Pages (线上)” 才会包含 main 的最新内容。
+      button: 发布
 
 # -----------------------------------------------------------------------------
 # 全局设置
