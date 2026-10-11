@@ -5,8 +5,8 @@ role: 管理员
 weight: 10
 animation:
   entrance:
-    name: run
-    speed: 1
+    name: wave_right
+    speed: 2
   idle:
     name: idle
     speed: 1

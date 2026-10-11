@@ -11,7 +11,7 @@
 // animations/*.animation.json（播放器见 utils/blockbenchAnimation）。
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { parseFrontmatter, type YamlValue } from '../utils/articleFeed'
-import { ENTRANCE_BLEND_SECONDS } from '../config'
+import { ENTRANCE_BLEND_SECONDS, ENTRANCE_DELAY_MS } from '../config'
 import {
   BlockbenchAnimation,
   compileAnimation,
@@ -232,9 +232,10 @@ function setCameraPose(viewer: SkinViewer) {
 
 // —— 入场动作 → 待机动作 两段式播放 ——
 // 入场动作只播一整段（一次性的挥手、挥击、下蹲、起飞），时长由动画文件自己决定；
+// 切到该成员（或双击形象）后先按待机动作原地等 ENTRANCE_DELAY_MS，才开始播入场动作；
 // 播完进入混合期（过渡时长按站点配置 ENTRANCE_BLEND_SECONDS，全体成员统一）：
 // 每帧把两个动画各摆一遍姿势，再对整棵子树逐节点插值过渡到待机动作，
-// 之后待机一直保持。切到该成员、或双击形象时重播整段。
+// 之后待机一直保持。
 
 type PlayerRig = import('skinview3d').PlayerObject
 
@@ -242,6 +243,8 @@ interface PoseState {
   phase: 'entrance' | 'blend' | 'idle'
   entrance: RigAnimation | null
   idle: RigAnimation
+  /** 入场动作开播前的剩余等待时间（秒），每次（重）播入场时按站点配置初始化 */
+  delay: number
   /** 混合进度 0~1 */
   blend: number
   /** 参与插值的节点（首帧从形象子树收集） */
@@ -319,6 +322,7 @@ function createPose(m: StaffMember): PoseState | null {
     phase: entrance ? 'entrance' : 'idle',
     entrance,
     idle,
+    delay: ENTRANCE_DELAY_MS / 1000,
     blend: 0,
     nodes: null,
     from: [],
@@ -340,6 +344,13 @@ function updatePose(i: number, player: PlayerRig, rawDt: number) {
   // 切回后台标签页后 rAF 会攒出一个巨大的帧间隔，不截断的话入场和混合会在同一帧内直接跑完
   const dt = Math.min(rawDt, 0.1)
   if (s.phase === 'entrance' && s.entrance) {
+    // 开播前的等待：这段时间形象只按待机动作原地站着，入场动画一秒都不推进
+    if (s.delay > 0) {
+      s.delay -= dt
+      resetRig(player)
+      s.idle.update(player, dt)
+      return
+    }
     resetRig(player)
     s.entrance.update(player, dt)
     // 入场动画自己报「一整段播完了」，才交棒给待机
@@ -387,6 +398,7 @@ function playEntrance(i: number) {
   if (!entrance) return
   entrance.speed = entranceCfg.speed
   s.entrance = entrance
+  s.delay = ENTRANCE_DELAY_MS / 1000
   s.blend = 0
   s.phase = 'entrance'
 }

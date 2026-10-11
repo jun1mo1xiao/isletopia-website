@@ -4,6 +4,13 @@
 name: Creeper
 role: 技术组长
 weight: 20
+animation:
+  entrance:
+    name: wave_right
+    speed: 2
+  idle:
+    name: idle
+    speed: 1
 bio: 服务器插件与红石优化的幕后功臣，让高频机器与零 Tick 延迟共存，玩家炸服也不影响他人。
 skin: /skin/staff/lowrie_15th_year_anniversary.png
 ---
