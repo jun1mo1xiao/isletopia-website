@@ -7,7 +7,7 @@ weight: 0
 animation:
   entrance:
     name: wave_right
-    speed: 3
+    speed: 2
   idle:
     name: idle
     speed: 1

@@ -5,6 +5,8 @@
 //
 // 输出到项目根 animations/<动作名>.animation.json，StaffCarousel.vue 构建期读取。
 // 这些文件是转换产物，可以直接用 Blockbench 打开继续编辑；重新执行本脚本会整体覆盖。
+// 例外：animations/wave_right 已按手感手改（连摇三下后甩开停住），本脚本烘不出这个形状，
+// 重跑前要么先备份，要么把这里的 wave() 换成想要的样子。
 //
 // 做法：按 libs/animation.js（skinview3d 3.4.2）里的公式逐帧采样，每帧先从绑定姿势
 // 出发（等价于 viewer 每帧的 resetJoints），再取相对绑定姿势的增量。
