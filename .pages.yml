@@ -559,14 +559,28 @@ content:
     label: 管理组成员
     type: collection
     path: staff
-    filename: "{primary}.md"
+    # {primary} 由 Pages CMS 用 slugify(值, { lower: true, strict: true }) 生成，
+    # strict 只保留 A-Za-z0-9：中文成员名会被清成空串，文件名退化成 ".md"。
+    # 服务端把 ".md" 按 dotfile 处理、判定扩展名为空，与集合要求的 md 不符，
+    # 于是保存时报 Invalid extension "" for content "staff"。
+    # 双保险：name 字段用 pattern 限定 ASCII（正常路径），
+    # field: create 让创建时文件名可直接手改（需要中文名等特殊情况的退路）。
+    filename:
+      template: "{primary}.md"
+      field: create
     format: yaml-frontmatter
     view:
       fields: [name, role]
       primary: name
       sort: name
     fields:
-      - { name: name, label: 成员名称（游戏 ID）, type: string, required: true }
+      - name: name
+        label: 成员名称（游戏 ID，同时用作文件名）
+        type: string
+        required: true
+        pattern:
+          regex: "^[A-Za-z0-9_-]{1,32}$"
+          message: 成员名称只能使用字母、数字、下划线或短横线，它会直接成为 staff/ 下的文件名；填中文会保存失败
       - { name: role, label: 职务, type: string, required: true }
       - { name: bio, label: 一段话简介（单段文字）, type: text, required: true }
       - { name: weight, label: 排序权重（越小越靠前，默认 0）, type: number }
@@ -595,11 +609,16 @@ content:
                     - { name: swim, label: 游泳 }
                     - { name: idle, label: 待机（轻微呼吸摆动） }
               - name: speed
-                label: 播放速度（1 为原速，越小越慢；入场动作要播完一整段，不能填 0）
+                label: 播放速度（0.01~10 之间任意数，1 为原速，越小越慢；入场动作要播完一整段，不能填 0）
                 type: number
                 default: 1
                 options:
                   min: 0.01
+                  max: 10
+                  # 不写 step 时浏览器按「步长 1」校验，而步长是从 min 起算的：
+                  # min 0.01 就只认 1.01、2.01……填 0.7、1.5 会被判为非法。
+                  # any 表示不设步长，允许任意小数。
+                  step: "any"
           - name: idle
             label: 待机动作（入场动作播完后一直保持）
             type: object
@@ -620,11 +639,14 @@ content:
                     - { name: hit, label: 攻击（挥击） }
                     - { name: swim, label: 游泳 }
               - name: speed
-                label: 播放速度（1 为原速，越小越慢；填 0 定格在起始姿势）
+                label: 播放速度（0~10 之间任意数，1 为原速，越小越慢；填 0 定格在起始姿势）
                 type: number
                 default: 0.7
                 options:
                   min: 0
+                  max: 10
+                  # 同 entrance.speed：步长默认 1 且从 min 起算，不写 step 就填不进 0.7 这类小数
+                  step: "any"
       - name: skin
         label: 皮肤 PNG
         type: image
