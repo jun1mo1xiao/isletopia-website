@@ -681,7 +681,7 @@ content:
 actions:
   # 日常最常用：改完内容先构建一次 main 看效果，只出预览地址，不碰线上
   - name: cf-preview
-    label: 发布到 CF-Pages（预览）
+    label: 在CF-Pages上预览
     workflow: preview.yml
     ref: main
     confirm:
@@ -689,7 +689,7 @@ actions:
       message: 请务必确认所有在 pagecms 上的修改都已经保存成功。执行后，通过 https://main.isletopia-website.pages.dev/ 查看预览效果。
       button: 确认并执行
   - name: cloudflare-publish
-    label: 发布到 CF-Pages (线上)
+    label: 发布到CF-Pages(主要)
     workflow: publish.yml
     ref: main
     confirm:
@@ -697,7 +697,7 @@ actions:
       message: 请务必确认所有在 pagecms 上的修改都已经保存成功，并且已经通过 “发布到 CF-Pages（预览）” 进行网站预览，确保没有BUG。执行后，将 deploy 分支快进到 main 的最新提交，Cloudflare Pages 随即构建一次。若 deploy 含有 main 之外的提交则拒绝执行。线上地址为： https://menghuanzhiyu.com/ 。
       button: 发布
   - name: github-publish
-    label: 发布到 GH-Pages (线上，备用)
+    label: 发布到GH-Pages(备用)
     workflow: pages.yml
     ref: main
     confirm:
