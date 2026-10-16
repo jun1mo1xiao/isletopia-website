@@ -4,7 +4,8 @@
 // 构建期由 Vite 读盘打包，CMS 改动后重新部署即生效。
 // 轮播方式为整页滑动：所有成员卡片排成一条横向轨道，整体 translateX 左移切换
 // （皮肤预览随卡片一起滑动）。每个成员一个 skinview3d 实例，惰性创建——
-// 首次滑到该页才建 WebGL 上下文；非当前页 renderPaused 暂停渲染循环，避免多开空转。
+// 首次滑到该页才建 WebGL 上下文。WebGL 上下文数量有浏览器上限（移动端常约 8 个），
+// 轮播成员一多就会把最早创建的挤成空白画布，因此只保留当前页，滑出动画结束后释放其余实例。
 // skinview3d 依赖 WebGL，只能在浏览器端初始化：动态 import 放在 onMounted 内，
 // SSR 阶段仅渲染卡片骨架，不加载 three。
 // skinview3d 只用它的形象与渲染，动作数据换成 Blockbench 导出的
@@ -250,8 +251,49 @@ type Skinview3dModule = typeof import('skinview3d')
 const stageEls: (HTMLElement | null)[] = []
 const viewers: (SkinViewer | null)[] = []
 const observers: (ResizeObserver | null)[] = []
+// 与 viewers 同下标；释放实例时一并清掉，重建后由 createPose 重写
+const poses: (PoseState | null)[] = []
+// 各画布的 contextlost 监听，dispose 时摘掉，避免重建后重复绑定
+const contextLostHandlers: (EventListener | null)[] = []
 let skinview3d: Skinview3dModule | null = null
 let disposed = false
+
+// 滑动动画时长与 CSS transition 对齐（0.45s），出页画布在这段时间里仍可见
+const SLIDE_TRANSITION_MS = 500
+const trimTimers = new Map<number, number>()
+
+function disposeViewer(i: number) {
+  const timer = trimTimers.get(i)
+  if (timer !== undefined) {
+    window.clearTimeout(timer)
+    trimTimers.delete(i)
+  }
+  observers[i]?.disconnect()
+  observers[i] = null
+  const canvas = stageEls[i]?.querySelector('canvas')
+  const onLost = contextLostHandlers[i]
+  if (canvas && onLost) canvas.removeEventListener('webglcontextlost', onLost)
+  contextLostHandlers[i] = null
+  viewers[i]?.dispose()
+  viewers[i] = null
+  poses[i] = null
+}
+
+/** 滑出动画结束后，释放除 keep 以外的全部 WebGL 实例，避免上下文超限把旧画布挤空 */
+function scheduleTrimViewers(keep: number) {
+  for (const t of trimTimers.values()) window.clearTimeout(t)
+  trimTimers.clear()
+  for (let i = 0; i < viewers.length; i++) {
+    if (i === keep || !viewers[i]) continue
+    trimTimers.set(
+      i,
+      window.setTimeout(() => {
+        // 等待期间又切回来的话，不释放
+        if (current.value !== i) disposeViewer(i)
+      }, SLIDE_TRANSITION_MS)
+    )
+  }
+}
 
 function setStageRef(i: number, el: unknown) {
   stageEls[i] = (el as HTMLElement | null) ?? null
@@ -446,8 +488,6 @@ interface PoseState {
   to: number[]
 }
 
-const poses: (PoseState | null)[] = []
-
 // 整棵子树逐节点插值：动画写入的骨骼除了六个肢体，还可能是整体（root）、cape、elytra，
 // 改动会连带传到下属节点，只挑几个刚体插的话，其余节点会在混合起点直接跳到待机姿势
 function collectRigNodes(player: PlayerRig): RigNode[] {
@@ -640,6 +680,15 @@ async function ensureViewer(i: number) {
   observer.observe(stage)
   observers[i] = observer
   viewers[i] = viewer
+  // 浏览器因上下文超限回收 GPU 时，丢弃当前实例并在需要时重建
+  const canvas = stage.querySelector('canvas')!
+  const onContextLost: EventListener = (e) => {
+    e.preventDefault()
+    disposeViewer(i)
+    if (current.value === i) void ensureViewer(i)
+  }
+  contextLostHandlers[i] = onContextLost
+  canvas.addEventListener('webglcontextlost', onContextLost)
   loadSkin(i)
 }
 
@@ -649,6 +698,8 @@ watch(current, (now, before) => {
   // 切到的这一位重走一遍入场 → 待机。viewer 首次创建时 createPose 本就停在入场阶段，
   // 等 ensureViewer 落定再触发，让「新建」和「已存在」两种情况表现一致
   ensureViewer(now).then(() => playEntrance(now))
+  // 滑出动画结束后释放其余 WebGL 实例（浏览器上下文配额有限）
+  scheduleTrimViewers(now)
   // 指示器行跟着滑到当前头像居中
   nextTick(() => centerActiveDot(true))
 })
