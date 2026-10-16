@@ -3,9 +3,10 @@
 // 成员数据来自项目根 staff/ 目录的 md frontmatter（Pages CMS「管理组成员」集合），
 // 构建期由 Vite 读盘打包，CMS 改动后重新部署即生效。
 // 轮播方式为整页滑动：所有成员卡片排成一条横向轨道，整体 translateX 左移切换
-// （皮肤预览随卡片一起滑动）。每个成员一个 skinview3d 实例，惰性创建——
-// 首次滑到该页才建 WebGL 上下文。WebGL 上下文数量有浏览器上限（移动端常约 8 个），
-// 轮播成员一多就会把最早创建的挤成空白画布，因此只保留当前页，滑出动画结束后释放其余实例。
+// （皮肤预览随卡片一起滑动）。每个成员一个 skinview3d 实例，进入该页时立即重建：
+// WebGL 上下文与 canvas 节点绑定、dispose 后无法在原节点上重绑，且浏览器有上下文
+// 数量上限（移动端常约 8 个），复用旧实例会空白。所以切到某页就销毁旧的、换新 canvas 重建，
+// 滑出动画结束后再释放离页实例。
 // skinview3d 依赖 WebGL，只能在浏览器端初始化：动态 import 放在 onMounted 内，
 // SSR 阶段仅渲染卡片骨架，不加载 three。
 // skinview3d 只用它的形象与渲染，动作数据换成 Blockbench 导出的
@@ -245,7 +246,7 @@ function restartTimer() {
   if (timer !== null) startTimer()
 }
 
-// —— skinview3d 3D 形象（每页一个，惰性创建 + 离页暂停） ——
+// —— skinview3d 3D 形象（每页一个，进入即建、离开即释放） ——
 type SkinViewer = import('skinview3d').SkinViewer
 type Skinview3dModule = typeof import('skinview3d')
 const stageEls: (HTMLElement | null)[] = []
@@ -255,12 +256,29 @@ const observers: (ResizeObserver | null)[] = []
 const poses: (PoseState | null)[] = []
 // 各画布的 contextlost 监听，dispose 时摘掉，避免重建后重复绑定
 const contextLostHandlers: (EventListener | null)[] = []
+// 正在创建中的页：同一页并发 ensureViewer 时只建一次，后到的等同一条 Promise
+const creatingViewers = new Map<number, Promise<void>>()
 let skinview3d: Skinview3dModule | null = null
 let disposed = false
 
 // 滑动动画时长与 CSS transition 对齐（0.45s），出页画布在这段时间里仍可见
 const SLIDE_TRANSITION_MS = 500
 const trimTimers = new Map<number, number>()
+
+/**
+ * 换上一张全新的 canvas。
+ * WebGL 上下文与 canvas 节点绑定，viewer.dispose() 之后同一节点拿不回新上下文，
+ * 在旧节点上重建会静默失败——所以释放时直接丢掉旧节点。
+ */
+function replaceCanvas(stage: HTMLElement): HTMLCanvasElement {
+  const next = document.createElement('canvas')
+  next.className = 'staff-carousel__canvas'
+  next.setAttribute('aria-hidden', 'true')
+  const old = stage.querySelector('canvas')
+  if (old) old.replaceWith(next)
+  else stage.insertBefore(next, stage.firstChild)
+  return next
+}
 
 function disposeViewer(i: number) {
   const timer = trimTimers.get(i)
@@ -270,13 +288,16 @@ function disposeViewer(i: number) {
   }
   observers[i]?.disconnect()
   observers[i] = null
-  const canvas = stageEls[i]?.querySelector('canvas')
+  const stage = stageEls[i]
+  const canvas = stage?.querySelector('canvas')
   const onLost = contextLostHandlers[i]
   if (canvas && onLost) canvas.removeEventListener('webglcontextlost', onLost)
   contextLostHandlers[i] = null
   viewers[i]?.dispose()
   viewers[i] = null
   poses[i] = null
+  // 旧 canvas 的上下文已死，换掉它，下次 ensureViewer 才能真的建起来
+  if (stage) replaceCanvas(stage)
 }
 
 /** 滑出动画结束后，释放除 keep 以外的全部 WebGL 实例，避免上下文超限把旧画布挤空 */
@@ -635,13 +656,27 @@ function playEntrance(i: number) {
   s.phase = 'entrance'
 }
 
-async function ensureViewer(i: number) {
-  if (!stageEls[i]) return
-  if (viewers[i]) {
-    // 已有实例：恢复渲染循环即可
-    viewers[i]!.renderPaused = false
-    return
-  }
+/**
+ * 进入页面时立即重建 viewer（不复用旧实例）。
+ * WebGL 上下文一旦 dispose 就无法在原 canvas 上重绑，而浏览器又会在
+ * 超限时静默回收旧上下文——复用「还在的旧实例」或「旧 canvas」都会空白，
+ * 所以切换到某页时总是销毁重建。
+ */
+function ensureViewer(i: number): Promise<void> {
+  if (disposed) return Promise.resolve()
+  const pending = creatingViewers.get(i)
+  if (pending) return pending
+  // 立即丢掉旧实例（含旧 canvas），再重建
+  disposeViewer(i)
+  const task = createViewer(i).finally(() => {
+    creatingViewers.delete(i)
+  })
+  creatingViewers.set(i, task)
+  return task
+}
+
+async function createViewer(i: number) {
+  if (!stageEls[i] || disposed) return
   try {
     skinview3d ||= await import('skinview3d')
   } catch {
@@ -649,6 +684,8 @@ async function ensureViewer(i: number) {
   }
   if (disposed) return
   const stage = stageEls[i]!
+  // 每次都用新 canvas：旧节点的 WebGL 上下文复用不了，这是重建后空白的直接原因
+  const canvas = replaceCanvas(stage)
   // 动画目录缺 idle 时 createPose 返回 null，形象按绑定姿势静止显示
   poses[i] = createPose(members[i])
   // FunctionAnimation 只当作「每帧回调」用：真正的两段式调度在 updatePose 里。
@@ -657,7 +694,7 @@ async function ensureViewer(i: number) {
     updatePose(i, player, dt)
   )
   const viewer = new skinview3d.SkinViewer({
-    canvas: stage.querySelector('canvas')!,
+    canvas,
     // 以舞台实际尺寸初始化；后续尺寸变化由 ResizeObserver 同步
     width: stage.clientWidth || 300,
     height: stage.clientHeight || 400,
@@ -665,6 +702,12 @@ async function ensureViewer(i: number) {
     zoom: ORTHO_LIKE_ZOOM,
     animation
   })
+  // 创建途中被卸载/重建：丢掉这一份，不要挂上去
+  if (disposed || viewers[i]) {
+    viewer.dispose()
+    poses[i] = null
+    return
+  }
   // 不自动旋转（skinview3d 的 autoRotate 转的是人物而非相机），只保留所选动作本身
   viewer.autoRotate = false
   // 转视角由阶段上的指针拖拽自己改 yaw/pitch（松手复原），控件只保留 target 更新；
@@ -680,8 +723,7 @@ async function ensureViewer(i: number) {
   observer.observe(stage)
   observers[i] = observer
   viewers[i] = viewer
-  // 浏览器因上下文超限回收 GPU 时，丢弃当前实例并在需要时重建
-  const canvas = stage.querySelector('canvas')!
+  // 浏览器因上下文超限回收 GPU 时，立即丢弃并重建，不让画布一直空白
   const onContextLost: EventListener = (e) => {
     e.preventDefault()
     disposeViewer(i)
