@@ -9,7 +9,7 @@
 // SSR 阶段仅渲染卡片骨架，不加载 three。
 // skinview3d 只用它的形象与渲染，动作数据换成 Blockbench 导出的
 // animations/*.animation.json（播放器见 utils/blockbenchAnimation）。
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { parseFrontmatter, type YamlValue } from '../utils/articleFeed'
 import {
   CAMERA_PITCH_DEG,
@@ -182,6 +182,34 @@ async function loadFace(i: number) {
   } catch {
     // 与 3D 形象共用同一套皮肤：加载失败时保留占位，由 skinMissing 提示
   }
+}
+
+// —— 头像指示器跟随当前页：横向滚到中间 ——
+const dotsEl = ref<HTMLElement | null>(null)
+const dotEls: (HTMLElement | null)[] = []
+
+function setDotRef(i: number, el: unknown) {
+  dotEls[i] = (el as HTMLElement | null) ?? null
+}
+
+/** 把当前头像滚到指示器行的水平中心；放得下时不滚动（由 CSS 边距居中） */
+function centerActiveDot(smooth: boolean) {
+  const wrap = dotsEl.value
+  const el = dotEls[current.value]
+  if (!wrap || !el) return
+  // 整行放得下时靠首尾 auto 边距居中，无需滚动
+  const max = wrap.scrollWidth - wrap.clientWidth
+  if (max <= 0) return
+  // 只滚动头像行自身。不用 scrollIntoView：它会连带滚动 overflow:hidden 的
+  // 祖先（卡片视口也能被程序 scrollLeft），把成员卡片的 translateX 轨道拽歪，
+  // 表现为邻页被错误露出（上一位/下一位「错位」）
+  const wrapRect = wrap.getBoundingClientRect()
+  const elRect = el.getBoundingClientRect()
+  const delta = elRect.left + elRect.width / 2 - (wrapRect.left + wrapRect.width / 2)
+  wrap.scrollTo({
+    left: Math.min(max, Math.max(0, wrap.scrollLeft + delta)),
+    behavior: smooth ? 'smooth' : 'auto'
+  })
 }
 
 function goTo(i: number) {
@@ -621,6 +649,8 @@ watch(current, (now, before) => {
   // 切到的这一位重走一遍入场 → 待机。viewer 首次创建时 createPose 本就停在入场阶段，
   // 等 ensureViewer 落定再触发，让「新建」和「已存在」两种情况表现一致
   ensureViewer(now).then(() => playEntrance(now))
+  // 指示器行跟着滑到当前头像居中
+  nextTick(() => centerActiveDot(true))
 })
 
 onMounted(() => {
@@ -628,6 +658,8 @@ onMounted(() => {
   ensureViewer(0)
   // 指示器头像只需贴图本身，不依赖 WebGL，启动时全部合成好
   members.forEach((_, i) => loadFace(i))
+  // 首屏把当前头像放到中间（无动画，避免进场就横移）
+  nextTick(() => centerActiveDot(false))
 })
 
 onBeforeUnmount(() => {
@@ -734,10 +766,11 @@ onBeforeUnmount(() => {
       </button>
 
       <!-- 头像指示器（位于卡片内部底部）：当前页彩色放大，其余灰阶原尺寸 -->
-      <div v-if="count > 1" class="staff-carousel__dots">
+      <div v-if="count > 1" ref="dotsEl" class="staff-carousel__dots">
         <button
           v-for="(m, i) in members"
           :key="m.name"
+          :ref="(el) => setDotRef(i, el)"
           class="staff-carousel__dot"
           :class="{ 'is-active': i === current }"
           :aria-label="`查看第 ${i + 1} 位成员：${m.name}`"
@@ -770,7 +803,9 @@ onBeforeUnmount(() => {
   background: var(--vp-c-bg);
   border: 1px solid var(--vp-c-divider);
   border-radius: 14px;
-  overflow: hidden;
+  /* clip 而非 hidden：hidden 仍是可编程滚动容器，scrollIntoView 之类的
+     操作会把视口 scrollLeft 拽走，连带把滑动轨道弄歪 */
+  overflow: clip;
   transition: border-color 0.25s;
 }
 
