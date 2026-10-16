@@ -142,6 +142,47 @@ const current = ref(0)
 const paused = ref(false)
 // 每位成员的皮肤加载状态（未配置 / 加载失败 → 显示占位提示）
 const skinMissing = ref<boolean[]>(members.map(() => false))
+// 指示器用的 2D 头像（底脸 + 帽层合成后的 data URL；未生成时显示占位方块）
+const faceUrls = ref<string[]>(members.map(() => ''))
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error(`无法加载皮肤：${src}`))
+    img.src = src
+  })
+}
+
+// 从皮肤贴图抠出头部正面 8x8，再叠上第二层（帽层）。
+// 皮肤布局：底脸 (8,8)、帽层脸 (40,8)；64x32 旧格式帽层坐标相同，
+// 贴图过小（容不下帽层）时只取底层，避免越界取样
+function composeFace(img: HTMLImageElement): string | null {
+  const size = 8
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(img, 8, 8, size, size, 0, 0, size, size)
+  if (img.width >= 48 && img.height >= 16) {
+    ctx.drawImage(img, 40, 8, size, size, 0, 0, size, size)
+  }
+  return canvas.toDataURL('image/png')
+}
+
+async function loadFace(i: number) {
+  const skin = members[i].skin
+  if (!skin) return
+  try {
+    const img = await loadImage(skin)
+    const url = composeFace(img)
+    if (url) faceUrls.value[i] = url
+  } catch {
+    // 与 3D 形象共用同一套皮肤：加载失败时保留占位，由 skinMissing 提示
+  }
+}
 
 function goTo(i: number) {
   if (count === 0) return
@@ -458,6 +499,8 @@ watch(current, (now, before) => {
 onMounted(() => {
   startTimer()
   ensureViewer(0)
+  // 指示器头像只需贴图本身，不依赖 WebGL，启动时全部合成好
+  members.forEach((_, i) => loadFace(i))
 })
 
 onBeforeUnmount(() => {
@@ -554,19 +597,29 @@ onBeforeUnmount(() => {
           />
         </svg>
       </button>
-    </div>
 
-    <!-- 底部圆点指示器 -->
-    <div v-if="count > 1" class="staff-carousel__dots">
-      <button
-        v-for="(m, i) in members"
-        :key="m.name"
-        class="staff-carousel__dot"
-        :class="{ 'is-active': i === current }"
-        :aria-label="`查看第 ${i + 1} 位成员：${m.name}`"
-        :aria-current="i === current"
-        @click="goTo(i)"
-      ></button>
+      <!-- 头像指示器（位于卡片内部底部）：当前页彩色放大，其余灰阶原尺寸 -->
+      <div v-if="count > 1" class="staff-carousel__dots">
+        <button
+          v-for="(m, i) in members"
+          :key="m.name"
+          class="staff-carousel__dot"
+          :class="{ 'is-active': i === current }"
+          :aria-label="`查看第 ${i + 1} 位成员：${m.name}`"
+          :aria-current="i === current"
+          @click="goTo(i)"
+        >
+          <img
+            v-if="faceUrls[i]"
+            class="staff-carousel__face"
+            :src="faceUrls[i]"
+            :alt="`${m.name} 的皮肤头像`"
+            width="8"
+            height="8"
+          />
+          <span v-else class="staff-carousel__face staff-carousel__face--empty"></span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -602,8 +655,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 28px;
   /* 内边距放在每页自身而非视口：overflow 只裁到视口边界，
-     相邻页（连同其 padding）在静止与滑动过程中都不会从边缘露出 */
-  padding: 28px 56px;
+     相邻页（连同其 padding）在静止与滑动过程中都不会从边缘露出；
+     底部留出头像指示器高度，避免文字被盖住 */
+  padding: 28px 56px 52px;
 }
 
 /* —— 3D 形象舞台：透明背景，与卡片背景保持一致；双击可重播入场动作 —— */
@@ -705,34 +759,67 @@ onBeforeUnmount(() => {
   right: 12px;
 }
 
-/* —— 圆点指示器 —— */
+/* —— 头像指示器（卡片内部底部居中） —— */
 .staff-carousel__dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14px;
   display: flex;
+  align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-top: 16px;
+  gap: 12px;
+  z-index: 1;
 }
 
 .staff-carousel__dot {
-  width: 9px;
-  height: 9px;
+  /* 外框固定 32px，头像在内部 24↔32 缩放，切换时圆点行不发生位移 */
+  width: 32px;
+  height: 32px;
   padding: 0;
-  background: var(--vp-c-divider);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
   border: none;
-  border-radius: 50%;
+  border-radius: 6px;
   cursor: pointer;
+}
+
+.staff-carousel__face {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  /* 8x8 像素脸：只允许整数倍放大，避免半像素发糊 */
+  image-rendering: pixelated;
+  /* 未轮到：黑白色、正常大小 */
+  filter: grayscale(1);
   transition:
-    background-color 0.2s,
-    transform 0.2s;
+    width 0.25s ease,
+    height 0.25s ease,
+    filter 0.25s ease;
+  pointer-events: none;
 }
 
-.staff-carousel__dot:hover {
-  background: var(--vp-c-text-3);
+.staff-carousel__face--empty {
+  background: var(--vp-c-bg);
+  box-shadow: inset 0 0 0 1px var(--vp-c-divider);
 }
 
-.staff-carousel__dot.is-active {
-  background: var(--vp-c-brand-1);
-  transform: scale(1.25);
+.staff-carousel__dot:hover .staff-carousel__face {
+  filter: grayscale(0.45);
+}
+
+/* 轮到当前页：彩色并放大一点（24px → 32px，整数倍） */
+.staff-carousel__dot.is-active .staff-carousel__face {
+  width: 32px;
+  height: 32px;
+  filter: grayscale(0);
+}
+
+.staff-carousel__dot.is-active:hover .staff-carousel__face {
+  filter: grayscale(0);
 }
 
 /* —— 占位提示淡入淡出 —— */
@@ -750,7 +837,7 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .staff-carousel__slide {
     flex-direction: column;
-    padding: 24px 48px 28px;
+    padding: 24px 48px 50px;
   }
 
   .staff-carousel__stage {
