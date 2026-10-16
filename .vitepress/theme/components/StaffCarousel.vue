@@ -255,9 +255,9 @@ function loadSkin(i: number) {
 
 // 沿指定方向重摆相机。距离取 skinview3d 已按 fov/zoom 算好的值，只改方向不改距离，
 // 取景大小因此不变；朝向由 OrbitControls.update() 按 target 重新 lookAt
-function setCameraPose(viewer: SkinViewer) {
-  const yaw = (CAMERA_YAW_DEG * Math.PI) / 180
-  const pitch = (CAMERA_PITCH_DEG * Math.PI) / 180
+function applyCamera(viewer: SkinViewer, yawDeg: number, pitchDeg: number) {
+  const yaw = (yawDeg * Math.PI) / 180
+  const pitch = (pitchDeg * Math.PI) / 180
   const d = viewer.camera.position.length()
   viewer.camera.position.set(
     d * Math.sin(yaw) * Math.cos(pitch),
@@ -266,6 +266,132 @@ function setCameraPose(viewer: SkinViewer) {
   )
   viewer.controls.target.set(0, 0, 0)
   viewer.controls.update()
+}
+
+function setCameraPose(viewer: SkinViewer) {
+  applyCamera(viewer, CAMERA_YAW_DEG, CAMERA_PITCH_DEG)
+}
+
+// —— 拖拽旋转视角（鼠标左键 / 触摸）：按住拖动改朝向，松开平滑复原 ——
+// OrbitControls 的 enableRotate 保持关闭，改由指针事件自己改 yaw/pitch：
+// 这样松手一定能回到站点配置的默认机位，不会被控件的惯性甩歪。
+const DRAG_ROTATE_DEG_PER_PX = 0.35
+const PITCH_LIMIT_DEG = 75
+const RESET_MS = 280
+
+interface DragState {
+  pointerId: number
+  x: number
+  y: number
+  yaw: number
+  pitch: number
+}
+
+const dragStates = new Map<number, DragState>()
+const resetRafs = new Map<number, number>()
+
+function clamp(v: number, min: number, max: number) {
+  return v < min ? min : v > max ? max : v
+}
+
+function cancelCameraReset(i: number) {
+  const raf = resetRafs.get(i)
+  if (raf !== undefined) {
+    cancelAnimationFrame(raf)
+    resetRafs.delete(i)
+  }
+}
+
+function cameraAngles(viewer: SkinViewer): { yaw: number; pitch: number } {
+  const p = viewer.camera.position
+  const d = p.length() || 1
+  return {
+    yaw: (Math.atan2(p.x, p.z) * 180) / Math.PI,
+    pitch: (Math.asin(clamp(p.y / d, -1, 1)) * 180) / Math.PI
+  }
+}
+
+function animateCameraHome(i: number) {
+  const viewer = viewers[i]
+  if (!viewer) return
+  cancelCameraReset(i)
+  const from = cameraAngles(viewer)
+  // yaw 走最短弧，避免复原时多转一整圈
+  let dy = ((CAMERA_YAW_DEG - from.yaw + 540) % 360) - 180
+  const dp = CAMERA_PITCH_DEG - from.pitch
+  const t0 = performance.now()
+  const step = () => {
+    const live = viewers[i]
+    if (!live) {
+      resetRafs.delete(i)
+      return
+    }
+    const k = clamp((performance.now() - t0) / RESET_MS, 0, 1)
+    const ease = 1 - (1 - k) ** 3
+    applyCamera(live, from.yaw + dy * ease, from.pitch + dp * ease)
+    if (k < 1) resetRafs.set(i, requestAnimationFrame(step))
+    else {
+      resetRafs.delete(i)
+      setCameraPose(live)
+    }
+  }
+  resetRafs.set(i, requestAnimationFrame(step))
+}
+
+function onStagePointerDown(i: number, e: PointerEvent) {
+  // 只响应主指针（鼠标左键 / 第一根手指）
+  if (!e.isPrimary) return
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  const stage = e.currentTarget as HTMLElement
+  const viewer = viewers[i]
+  if (!viewer) return
+  cancelCameraReset(i)
+  stage.setPointerCapture(e.pointerId)
+  const from = cameraAngles(viewer)
+  dragStates.set(i, {
+    pointerId: e.pointerId,
+    x: e.clientX,
+    y: e.clientY,
+    yaw: from.yaw,
+    pitch: from.pitch
+  })
+  // 拖拽中暂停自动轮播，避免视角刚转就被切走
+  paused.value = true
+}
+
+function onStagePointerMove(i: number, e: PointerEvent) {
+  const drag = dragStates.get(i)
+  if (!drag || drag.pointerId !== e.pointerId) return
+  const viewer = viewers[i]
+  if (!viewer) return
+  const dx = e.clientX - drag.x
+  const dy = e.clientY - drag.y
+  drag.x = e.clientX
+  drag.y = e.clientY
+  // 增量取负：拖拽方向与视角转动方向一致（向右拖则视角向右转，向上拖则视角向上抬）
+  drag.yaw -= dx * DRAG_ROTATE_DEG_PER_PX
+  drag.pitch = clamp(drag.pitch + dy * DRAG_ROTATE_DEG_PER_PX, -PITCH_LIMIT_DEG, PITCH_LIMIT_DEG)
+  applyCamera(viewer, drag.yaw, drag.pitch)
+}
+
+function onStagePointerUp(i: number, e: PointerEvent) {
+  const drag = dragStates.get(i)
+  if (!drag || drag.pointerId !== e.pointerId) return
+  dragStates.delete(i)
+  const stage = e.currentTarget as HTMLElement
+  if (stage.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId)
+  // 松开即复原默认机位
+  animateCameraHome(i)
+  // 触摸没有 hover：抬手后恢复自动轮播；
+  // 鼠标若拖拽期间已离开轮播（pointer capture 不触发 mouseleave），这里补一次
+  if (e.pointerType !== 'mouse' || !document.querySelector('.staff-carousel:hover')) {
+    paused.value = false
+  }
+}
+
+function onCarouselLeave() {
+  // 拖拽尚未结束时保持暂停，避免 capture 期间 mouseleave 把自动轮播打开
+  if (dragStates.size === 0) paused.value = false
 }
 
 // —— 入场动作 → 待机动作 两段式播放 ——
@@ -473,7 +599,8 @@ async function ensureViewer(i: number) {
   })
   // 不自动旋转（skinview3d 的 autoRotate 转的是人物而非相机），只保留所选动作本身
   viewer.autoRotate = false
-  // 固定相机视角，锁掉拖拽与滚轮缩放，避免被转歪后无法回正
+  // 转视角由阶段上的指针拖拽自己改 yaw/pitch（松手复原），控件只保留 target 更新；
+  // 锁掉控件自带的旋转与缩放，避免两套逻辑抢相机、滚轮把画面拽远
   viewer.controls.enableRotate = false
   viewer.controls.enableZoom = false
   setCameraPose(viewer)
@@ -506,6 +633,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true
   stopTimer()
+  dragStates.clear()
+  for (const i of resetRafs.keys()) cancelCameraReset(i)
   observers.forEach((o) => o?.disconnect())
   observers.length = 0
   viewers.forEach((v) => v?.dispose())
@@ -522,7 +651,7 @@ onBeforeUnmount(() => {
     aria-roledescription="轮播"
     aria-label="管理组成员"
     @mouseenter="paused = true"
-    @mouseleave="paused = false"
+    @mouseleave="onCarouselLeave"
     @focusin="paused = true"
     @focusout="paused = false"
   >
@@ -538,11 +667,17 @@ onBeforeUnmount(() => {
           class="staff-carousel__slide"
           :aria-hidden="i !== current"
         >
-          <!-- 左：3D 虚拟形象（skinview3d 画布，背景透明，与卡片融为一体），双击重播入场动作 -->
+          <!-- 左：3D 虚拟形象（skinview3d 画布，背景透明，与卡片融为一体）。
+               拖拽旋转视角，松开自动复原；双击重播入场动作 -->
           <div
             :ref="(el) => setStageRef(i, el)"
             class="staff-carousel__stage"
-            title="双击重播动作"
+            title="拖拽旋转视角，松开自动复原；双击重播动作"
+            @pointerdown="onStagePointerDown(i, $event)"
+            @pointermove="onStagePointerMove(i, $event)"
+            @pointerup="onStagePointerUp(i, $event)"
+            @pointercancel="onStagePointerUp(i, $event)"
+            @lostpointercapture="onStagePointerUp(i, $event)"
             @dblclick="playEntrance(i)"
           >
             <canvas class="staff-carousel__canvas" aria-hidden="true"></canvas>
@@ -632,7 +767,7 @@ onBeforeUnmount(() => {
 
 .staff-carousel__viewport {
   position: relative;
-  background: var(--vp-c-bg-soft);
+  background: var(--vp-c-bg);
   border: 1px solid var(--vp-c-divider);
   border-radius: 14px;
   overflow: hidden;
@@ -660,12 +795,20 @@ onBeforeUnmount(() => {
   padding: 28px 56px 52px;
 }
 
-/* —— 3D 形象舞台：透明背景，与卡片背景保持一致；双击可重播入场动作 —— */
+/* —— 3D 形象舞台：透明背景，与卡片背景保持一致；拖拽旋转、双击重播 —— */
 .staff-carousel__stage {
   position: relative;
   flex: 0 0 220px;
   height: 300px;
-  cursor: pointer;
+  cursor: grab;
+  /* 拖拽改视角需要独占手势，避免触摸时页面跟着滚动 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.staff-carousel__stage:active {
+  cursor: grabbing;
 }
 
 .staff-carousel__canvas {
