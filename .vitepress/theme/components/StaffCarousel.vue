@@ -902,21 +902,35 @@ onBeforeUnmount(() => {
   right: 12px;
 }
 
-/* —— 头像指示器（卡片内部底部居中） —— */
+/* —— 头像指示器（卡片内部底部） —— */
 .staff-carousel__dots {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 14px;
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: center;
+  /* 首尾 auto 边距：放得下时居中，放不下时让整行可横向滚动（配合 overflow） */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  /* 允许手指横向滑动头像行，纵向仍交给页面滚动 */
+  touch-action: pan-x;
   gap: 12px;
+  padding: 4px 16px;
+  /* 滚动条藏掉，手势仍可滑；避免窄屏被系统滚动条占高度 */
+  scrollbar-width: none;
   z-index: 1;
 }
 
+.staff-carousel__dots::-webkit-scrollbar {
+  display: none;
+}
+
 .staff-carousel__dot {
-  /* 外框固定 32px，头像在内部 24↔32 缩放，切换时圆点行不发生位移 */
+  /* 外框固定 32px，头像在内部 24↔32 缩放，切换时圆点行不发生位移；
+     flex-shrink 0：头像多时不被压扁，改由整行滚动 */
+  flex: 0 0 32px;
   width: 32px;
   height: 32px;
   padding: 0;
@@ -929,10 +943,20 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.staff-carousel__dot:first-child {
+  margin-left: auto;
+}
+
+.staff-carousel__dot:last-child {
+  margin-right: auto;
+}
+
 .staff-carousel__face {
   display: block;
+  flex: 0 0 auto;
   width: 24px;
   height: 24px;
+  aspect-ratio: 1;
   border-radius: 4px;
   /* 8x8 像素脸：只允许整数倍放大，避免半像素发糊 */
   image-rendering: pixelated;
