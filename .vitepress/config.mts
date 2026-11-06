@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { mcTextures, mcTextureAssets, craftingAssetsInlineLimit } from './mc-textures-plugin.mts'
+import { mcTextures, craftingAssetsInlineLimit } from './mc-textures-plugin.mts'
 import { generateSearchIndex } from './search/generate-index.ts'
 import { LINKS, NAV, SEO, SIDEBAR, SITE_INFO } from './theme/config'
 
@@ -104,12 +104,9 @@ export default defineConfig({
   // 仓库 README.md 是给 GitHub 看的说明，不作为站点页面构建/收录；
   // staff/ 是管理组成员数据（frontmatter，仅供 StaffCarousel.vue 读取），同样不生成页面
   srcExclude: ['README.md', 'staff/*.md'],
-  // 合成表页面（/crafting）的物品贴图虚拟模块与资产规则，见 mc-textures-plugin.mts
+  // 合成表页面（/crafting）的物品贴图虚拟模块，贴图由插件直接写入构建产物，见 mc-textures-plugin.mts
   vite: {
     plugins: [mcTextures()],
-    resolve: {
-      alias: [{ find: '@mc-textures', replacement: mcTextureAssets }]
-    },
     build: {
       assetsInlineLimit: craftingAssetsInlineLimit
     }

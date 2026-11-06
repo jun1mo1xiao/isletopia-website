@@ -1,9 +1,9 @@
 /**
  * 物品图标：来自 github.com/destruc7i0n/minecraft-textures（npm 包 minecraft-textures）。
- * 虚拟模块 virtual:mc-textures 由 vite.config.ts 的 mcTextures 插件生成：
+ * 虚拟模块 virtual:mc-textures 由 .vitepress/mc-textures-plugin.mts 的 mcTextures 插件生成：
  *   - items: manifest 物品元数据（id / readable / texture 哈希文件名）
- *   - urlLoaders: 哈希文件名 -> 异步解析 Vite 资产 URL
- * 贴图按需异步加载，运行时零网络请求。MC 版本统一在 vite.config.ts 的 MC_VERSION。
+ *   - urlLoaders: 哈希文件名 -> 贴图 URL（构建期由插件复制为 /mc-textures/<hash>.png，不进 Vite 资产图）
+ * 图标只在浏览器真正用到时加载。MC 版本统一在 mc-textures-plugin.mts 的 MC_VERSION。
  */
 import { items as manifestItems, urlLoaders } from 'virtual:mc-textures'
 import { zhDisplayName, zhItemName } from './lang'
