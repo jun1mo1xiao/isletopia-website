@@ -83,7 +83,9 @@ export const SIDEBAR: DefaultTheme.Sidebar = {
         { text: '幽匿侵蚀', link: '/wiki/特殊功能/幽匿侵蚀' },
         { text: '祈愿池', link: '/wiki/特殊功能/祈愿池' },
         { text: '幸运色', link: '/wiki/特殊功能/幸运色' },
-        { text: '挑战任务', link: '/wiki/特殊功能/挑战任务' }
+        { text: '挑战任务', link: '/wiki/特殊功能/挑战任务' },
+        { text: '岛屿季节', link: '/wiki/岛屿季节' },
+        { text: '枪械', link: '/wiki/枪械' }
       ]
     },
     {
@@ -117,7 +119,8 @@ export const SIDEBAR: DefaultTheme.Sidebar = {
       items: [
         { text: '岛屿系统', link: '/wiki/系统功能/岛屿系统' },
         { text: '玩家系统', link: '/wiki/系统功能/玩家系统' },
-        { text: '经济系统', link: '/wiki/系统功能/经济系统' }
+        { text: '经济系统', link: '/wiki/系统功能/经济系统' },
+        { text: '装备与词条', link: '/wiki/系统功能/装备与词条' }
       ]
     },
     {
