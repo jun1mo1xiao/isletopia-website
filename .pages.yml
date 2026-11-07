@@ -653,56 +653,21 @@ content:
           media: skins
 
 # -----------------------------------------------------------------------------
-# 按钮动作（actions）
-# Pages CMS 的 action 只做一件事：对指定的 GitHub Actions 工作流发一次
-# workflow_dispatch。按钮出现在仓库左侧的 Actions 页，点了才构建一次，
-# 因此无需给站点开「每次提交自动构建」——main 上频繁的 CMS 保存不触发构建。
-# 调度时 CMS 固定传一个名为 payload 的输入（JSON，含触发者与所在条目信息），
-# 所以对应工作流必须声明 inputs.payload，否则 GitHub 会以 422 拒绝。
-#   name/label  动作标识（字母数字与 - _）与按钮文字
-#   workflow    工作流文件名，写在哪个 ref 上由 ref 决定
-#   ref         在哪个分支跑该工作流；省略即 CMS 当前分支
-#   scope       按钮位置：collection / entry；省略则出现在全局 Actions 页
-#   confirm     点击前的二次确认框（发布这类动作务必加）
-#   cancelable  是否允许取消运行，默认 true
-# 前置条件：.github/workflows/ 下对应的工作流必须已存在于 ref 指定的分支上
-# （本仓库即 main），按钮才会出现在 Actions 页。
-# 两个按钮还需各配一次 secret（Settings → Secrets and variables → Actions）：
-#   CLOUDFLARE_PREVIEW_HOOK  Cloudflare 项目 → 设置 → 构建 → 添加 Deploy Hook，
-#                            Branch to build 填 main，把生成的 URL 存进来。
-#                            供「Cloudflare 预览 main」使用，无需 API 令牌。
-#   DEPLOY_TOKEN             供「发布到线上」使用：deploy 分支开了
-#                            「Require a pull request before merging」，默认令牌的
-#                            github-actions[bot] 身份不是管理员、推送会被拒，需要一个
-#                            属主本人的 fine-grained PAT（限定本仓库，
-#                            权限只给 Contents: Read and write）。
+# 按钮动作（actions）：有意留空
+# 站点已迁到 EdgeOne，构建全部由 EdgeOne 监听 git 推送自动完成，因此 CMS 里
+# 不再放任何按钮：
+#   - 推送到 deploy      → 生产构建，直接上线（https://menghuanzhiyu.com/）
+#   - 推送到其它任意分支 → 预览构建，只生成临时预览地址，不碰线上
+# 编辑者在 CMS 里保存即提交到 main，EdgeOne 会自动出一个预览版本，所以不需要
+# 手动「预览」按钮；要上线时由维护者在本地审核后运行 `npm run deploy`
+# （scripts/deploy.mjs 只做快进，绝不强推），把 main 推到 deploy 才产生生产构建。
+# 换句话说：预览是自动的，发布是手动的。
+# 若以后要加回按钮：一个 action 只是对某个 workflow_dispatch 工作流发一次调度，
+# 关键字段为 name/label（标识与按钮文字）、workflow（工作流文件）、ref（在哪个
+# 分支跑）、scope（collection / entry，省略则出现在全局 Actions 页）、confirm
+# （二次确认）、cancelable；且 CMS 固定只传一个名为 payload 的输入，对应工作流
+# 必须声明 inputs.payload，否则 GitHub 会以 422 拒绝。
 # -----------------------------------------------------------------------------
-actions:
-  # 日常最常用：改完内容先构建一次 main 看效果，只出预览地址，不碰线上
-  - name: cf-preview
-    label: 在CF-Pages上预览
-    workflow: preview.yml
-    ref: main
-    confirm:
-      title: 确认在 Cloudflare 执行 main 分支构建 （预览分支）
-      message: 请务必确认所有在 pagecms 上的修改都已经保存成功。执行后，通过 https://main.isletopia-website.pages.dev/ 查看预览效果。
-      button: 确认并执行
-  - name: cloudflare-publish
-    label: 发布到CF-Pages(主要)
-    workflow: publish.yml
-    ref: main
-    confirm:
-      title: 确认在 Cloudflare Pages 执行 deploy 分支构建 （线上分支）
-      message: 请务必确认所有在 pagecms 上的修改都已经保存成功，并且已经通过 “发布到 CF-Pages（预览）” 进行网站预览，确保没有BUG。执行后，将 deploy 分支快进到 main 的最新提交，Cloudflare Pages 随即构建一次。若 deploy 含有 main 之外的提交则拒绝执行。线上地址为： https://menghuanzhiyu.com/ 。
-      button: 发布
-  - name: github-publish
-    label: 发布到GH-Pages(备用)
-    workflow: pages.yml
-    ref: main
-    confirm:
-      title: 确认在 GitHub Pages 执行 deploy 分支构建 （备用线上分支）
-      message: 请务必确认所有在 pagecms 上的修改都已经保存成功，并且已经通过 “发布到 CF-Pages（预览）” 进行网站预览，确保没有BUG。执行后，将从 deploy 分支构建并部署到 https://tobbylowrie.github.io/isletopia-website/ 。注意本按钮取的是 deploy 分支，需先执行 “发布到 CF-Pages (线上)” 才会包含 main 的最新内容。
-      button: 发布
 
 # -----------------------------------------------------------------------------
 # 全局设置
@@ -716,9 +681,11 @@ settings:
   #
   # 发布策略（deploy 分支模式）：
   #   main 为日常集成分支，所有人的提交（含 CMS）都正常进入 main，不做任何
-  #   分支保护；Cloudflare Pages 的生产分支指向 deploy，只有把 main 合并到
-  #   deploy 并推送时站点才会发布。CMS 若需要隔离的草稿区，也可单独开分支
-  #   编辑，定稿后再合回 main。
+  #   分支保护；main 的推送只会让 EdgeOne 生成预览版本，不碰线上。
+  #   EdgeOne 的生产分支指向 deploy，只有把 main 合并到 deploy 并推送时站点
+  #   才会发布——具体动作是维护者在本地审核后运行 `npm run deploy`
+  #   （= scripts/deploy.mjs，只做快进，绝不强推）。
+  #   CMS 若需要隔离的草稿区，也可单独开分支编辑，定稿后再合回 main。
   commit:
     identity: user
     templates:

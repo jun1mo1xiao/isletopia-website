@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // 发布脚本:把 main 快进合并(fast-forward)到远程 deploy 分支。
-// Cloudflare Pages 的生产分支指向 deploy,推送后即触发线上构建。
+// EdgeOne 的生产分支指向 deploy,推送后即触发线上构建——这是本仓库唯一的
+// 发布途径(Pages CMS 与 GitHub Actions 都不再提供发布/预览按钮)。
+// 其余分支(含 main)的推送只会让 EdgeOne 生成预览版本,不会上线。
 //
 // 行为:
 //   - 本地 main 落后 origin/main 时拒绝执行,提示先拉取;
@@ -90,5 +92,5 @@ if (!DRY_RUN) {
       console.warn('⚠ 本地 deploy 引用同步失败(可能存在分歧),不影响本次发布')
     }
   }
-  console.log(`✓ 已发布 ${short('main')} → deploy,Cloudflare Pages 将自动构建上线`)
+  console.log(`✓ 已发布 ${short('main')} → deploy,EdgeOne 将自动构建上线`)
 }

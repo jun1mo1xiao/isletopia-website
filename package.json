@@ -8,6 +8,7 @@
     "docs:dev": "vitepress dev --host",
     "docs:build": "vitepress build",
     "docs:preview": "vitepress preview",
+    "build": "npm run docs:build",
     "deploy": "node scripts/deploy.mjs",
     "deploy:dry": "node scripts/deploy.mjs --dry-run",
     "animations:bake": "node scripts/bake-animations.mjs"

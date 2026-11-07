@@ -1,24 +1,16 @@
 # GitHub Pages 部署:把 deploy 分支构建出的 .vitepress/dist 发布到
 # https://tobbylowrie.github.io/isletopia-website/
 #
-# - 工作流只存在于 main 分支,由手动触发(gh workflow run / 网页按钮);
+# - 工作流只存在于 main 分支,由手动触发(Actions 页或 gh workflow run);
+#   Pages CMS 已不再提供任何构建/预览/发布按钮,见 .pages.yml 的 actions 注释。
 #   检出 deploy 分支只是 CI 运行时的临时副本,不会对 deploy 产生任何提交。
 # - VitePress 2 的 CLI 不支持 --base 覆盖,站点源码保持零改动,
 #   通过 Node API 在构建时注入 base(项目页部署在 /isletopia-website/ 子路径)。
-# - 正式站点仍由 Cloudflare Pages 部署(根路径,base 默认 '/'),本工作流不影响它。
+# - 正式站点由 EdgeOne 部署(根路径,base 默认 '/'),本工作流不影响它。
 name: Pages
 
 on:
   workflow_dispatch:
-    inputs:
-      # 供 Pages CMS 的「构建 GitHub Pages 预览」按钮调度：CMS 只传一个名为
-      # payload 的输入（JSON 字符串），未声明的输入会让调度被 GitHub 拒绝。
-      # 工作流本身不使用它。
-      payload:
-        description: Pages CMS 传入的触发上下文（JSON），本工作流不使用
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
